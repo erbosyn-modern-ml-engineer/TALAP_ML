@@ -16,6 +16,8 @@ from apps.api.schemas.catalog import (
 )
 from talap.catalog.import_types import MerchantInactiveError, MerchantNotFoundError
 from talap.db.models import Inventory, Merchant, Product, ProductVariant
+from talap.indexing import schedule_product_indexing
+from talap.indexing.decisions import semantic_changed_fields
 
 _PRODUCT_DUPLICATE_CONSTRAINTS = frozenset(
     {
@@ -82,6 +84,12 @@ async def create_product(
                 stock_quantity=payload.stock_quantity,
             )
             session.add_all([product, variant, inventory])
+            await schedule_product_indexing(
+                session=session,
+                merchant_id=merchant_id,
+                product_id=product.id,
+                changed_fields=["category", "description", "material", "name"],
+            )
             await session.commit()
         except IntegrityError as exc:
             await session.rollback()
@@ -140,6 +148,8 @@ async def patch_product(
             if inventory is None:
                 raise ProductStateError("Product catalog state is inconsistent.")
 
+            before_semantic = _semantic_values(product, variant)
+
             changes = payload.model_dump(exclude_unset=True)
 
             product_changed = _apply_product_changes(product, changes)
@@ -156,6 +166,19 @@ async def patch_product(
             if inventory_changed:
                 inventory.updated_at = cast(datetime, func.now())
                 await session.flush()
+
+            after_semantic = _semantic_values(product, variant)
+            semantic_fields = semantic_changed_fields(
+                before=before_semantic,
+                after=after_semantic,
+            )
+            if semantic_fields:
+                await schedule_product_indexing(
+                    session=session,
+                    merchant_id=product.merchant_id,
+                    product_id=product.id,
+                    changed_fields=semantic_fields,
+                )
 
             changed_entities: list[Product | ProductVariant | Inventory] = []
             if product_changed:
@@ -176,6 +199,15 @@ async def patch_product(
             raise ProductWriteError("Product could not be saved.") from exc
 
     return ProductResponse.from_records(product, variant, inventory)
+
+
+def _semantic_values(product: Product, variant: ProductVariant) -> dict[str, object]:
+    return {
+        "name": product.name,
+        "description": product.description,
+        "category": product.category,
+        "material": variant.material,
+    }
 
 
 def _apply_product_changes(

@@ -4,7 +4,11 @@ from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy.orm import class_mapper, configure_mappers
 
 from talap.db.base import Base
-from talap.db.models import CatalogImportStatus
+from talap.db.models import (
+    CatalogImportStatus,
+    ProductIndexingTask,
+    ProductIndexingTaskStatus,
+)
 
 
 def test_all_expected_tables_are_registered() -> None:
@@ -17,6 +21,7 @@ def test_all_expected_tables_are_registered() -> None:
         "inventory",
         "catalog_imports",
         "catalog_import_errors",
+        "product_indexing_tasks",
     }
     actual = set(Base.metadata.tables)
     assert actual == expected, f"Expected {expected}, got {actual}"
@@ -177,6 +182,102 @@ def test_enum_contract() -> None:
     assert actual == expected, f"Enum values mismatch: {actual}"
 
 
+def test_product_indexing_task_metadata() -> None:
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+    task_table = tables["product_indexing_tasks"]
+
+    # Native PostgreSQL enum: name and values (from value, not member names)
+    status_col = task_table.columns["status"]
+    assert status_col.type.__class__.__name__ == "ENUM"
+    enum_obj = status_col.type
+    assert enum_obj.name == "product_indexing_task_status"
+    assert enum_obj.enums == ["pending", "processing", "completed", "failed"]
+    assert enum_obj.values_callable is not None
+    assert enum_obj.create_type is False
+
+    # JSONB changed_fields
+    assert task_table.columns["changed_fields"].type.__class__.__name__ == "JSONB"
+
+    # attempts check with a deterministic name
+    assert _has_check_constraint(
+        task_table,
+        "ck_product_indexing_tasks_attempts_non_negative",
+    )
+
+    # Composite Product FK (product_id, merchant_id) → products(id, merchant_id)
+    composite_fks = [
+        c
+        for c in task_table.constraints
+        if isinstance(c, ForeignKeyConstraint) and len(c.columns) == 2
+    ]
+    assert len(composite_fks) == 1
+    task_fk = composite_fks[0]
+    assert {col.name for col in task_fk.columns} == {"product_id", "merchant_id"}
+    assert task_fk.name == "fk_product_indexing_tasks_product_merchant"
+    assert task_fk.ondelete == "CASCADE"
+    remote = [(elem.column.table.name, elem.column.name) for elem in task_fk.elements]
+    assert ("products", "id") in remote
+    assert ("products", "merchant_id") in remote
+
+    # Required indexes
+    index_names = {index.name for index in task_table.indexes}
+    assert {
+        "ix_product_indexing_tasks_status",
+        "ix_product_indexing_tasks_available_at",
+        "ix_product_indexing_tasks_product_id",
+    } <= index_names
+
+    # Python enum contract
+    actual = [value.value for value in ProductIndexingTaskStatus]
+    assert actual == ["pending", "processing", "completed", "failed"]
+
+
+def test_product_indexing_task_relationship_contract() -> None:
+    import talap.db.models  # noqa: F401
+
+    configure_mappers()
+
+    rel = class_mapper(Base.registry._class_registry["Product"]).relationships[
+        "indexing_tasks"
+    ]
+    # ORM must rely on the PostgreSQL ON DELETE CASCADE, never null out the
+    # non-null composite FK, and never load the task collection on delete.
+    assert rel.passive_deletes is True
+    assert "delete-orphan" not in rel.cascade
+    assert "delete" not in rel.cascade
+    assert rel.back_populates == "product"
+    assert rel.backref is None
+    # one Product -> many ProductIndexingTask rows
+    assert rel.uselist is True
+
+
+def test_product_indexing_task_jsonb_default_contract() -> None:
+    import talap.db.models  # noqa: F401
+
+    column = ProductIndexingTask.__table__.c.changed_fields
+
+    # PostgreSQL JSONB column type
+    assert column.type.__class__.__name__ == "JSONB"
+
+    # Python default must be a callable factory, never a shared empty list.
+    # SQLAlchemy does not apply column defaults until INSERT, so inspect the
+    # callable column default and prove it yields a fresh list per call.
+    assert column.default is not None
+    default_factory = column.default.arg
+    assert callable(default_factory)
+
+    first = default_factory(None)
+    second = default_factory(None)
+    assert first == [] and second == []
+    assert first is not second
+
+    # Server default must produce an empty PostgreSQL JSONB array.
+    assert column.server_default is not None
+    assert "[]" in str(column.server_default.arg)
+
+
 # ── Audit tests ──────────────────────────────────────────────────────
 
 
@@ -208,12 +309,17 @@ def test_column_nullability_contract() -> None:
         "catalog_import_errors": {
             "catalog_import_id", "code", "message", "id", "created_at",
         },
+        "product_indexing_tasks": {
+            "id", "merchant_id", "product_id", "status", "changed_fields",
+            "attempts", "available_at", "created_at", "updated_at",
+        },
     }
 
     nullable = {
         "product_variants": {"size", "color", "material", "image_url"},
         "catalog_imports": {"completed_at", "failed_at"},
         "catalog_import_errors": {"row_number", "field", "value"},
+        "product_indexing_tasks": {"started_at", "completed_at", "last_error"},
     }
 
     for tname, cols in non_null.items():
@@ -377,7 +483,7 @@ def test_postgresql_ddl_compiles() -> None:
     for name, table in tables.items():
         ddl[name] = str(CreateTable(table).compile(dialect=postgresql.dialect()))
 
-    assert len(ddl) == 6
+    assert len(ddl) == 7
 
     # PostgreSQL UUID types on every primary key
     for tname in ddl:
@@ -464,6 +570,7 @@ def test_relationship_contract() -> None:
         ("ProductVariant", "inventory", "Inventory", "product_variant"),
         ("Merchant", "catalog_imports", "CatalogImport", "merchant"),
         ("CatalogImport", "errors", "CatalogImportError", "catalog_import"),
+        ("Product", "indexing_tasks", "ProductIndexingTask", "product"),
     }
     for cls_name, rel_name, other_cls, other_rel in expected_pairs:
         rel = mapper_of(cls_name).relationships[rel_name]
@@ -516,6 +623,11 @@ def test_no_duplicate_or_missing_columns() -> None:
         "catalog_import_errors": {
             "id", "catalog_import_id", "code", "message",
             "row_number", "field", "value", "created_at",
+        },
+        "product_indexing_tasks": {
+            "id", "merchant_id", "product_id", "status", "changed_fields",
+            "attempts", "available_at", "started_at", "completed_at",
+            "last_error", "created_at", "updated_at",
         },
     }
 

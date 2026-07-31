@@ -1,6 +1,7 @@
 from talap.db.models.catalog import Inventory, Product, ProductVariant
 from talap.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
 from talap.db.models.imports import CatalogImport, CatalogImportError, CatalogImportStatus
+from talap.db.models.indexing import ProductIndexingTask, ProductIndexingTaskStatus
 from talap.db.models.merchant import Merchant
 
 __all__ = [
@@ -10,6 +11,8 @@ __all__ = [
     "Inventory",
     "Merchant",
     "Product",
+    "ProductIndexingTask",
+    "ProductIndexingTaskStatus",
     "ProductVariant",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",

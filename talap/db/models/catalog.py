@@ -12,6 +12,7 @@ from talap.db.base import Base
 from talap.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from talap.db.models.indexing import ProductIndexingTask
     from talap.db.models.merchant import Merchant
 
 
@@ -59,6 +60,14 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     variants: Mapped[list[ProductVariant]] = relationship(
         "ProductVariant",
         back_populates="product",
+    )
+
+    indexing_tasks: Mapped[list[ProductIndexingTask]] = relationship(
+        "ProductIndexingTask",
+        back_populates="product",
+        # The composite FK is non-null and uses ON DELETE CASCADE; SQLAlchemy
+        # must not load the task collection or null out child FKs on delete.
+        passive_deletes=True,
     )
 
 

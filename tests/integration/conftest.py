@@ -20,6 +20,7 @@ _APP_TABLES = (
     "catalog_imports",
     "inventory",
     "product_variants",
+    "product_indexing_tasks",
     "products",
     "merchants",
 )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
@@ -26,6 +26,8 @@ from talap.db.models import (
     Product,
     ProductVariant,
 )
+from talap.indexing import schedule_product_indexing
+from talap.indexing.decisions import SEMANTIC_PRODUCT_FIELDS, semantic_changed_fields
 
 _MAX_FILENAME_LENGTH = 255
 _MUTATION_ERROR_MESSAGE = "Catalog import failed during database mutation."
@@ -302,6 +304,8 @@ async def _run_catalog_mutation(
         ).scalars()
     )
 
+    semantic_by_key = await _load_semantic_values(session, merchant_id)
+
     product_id_by_key = await _upsert_products(
         session,
         merchant_id=merchant_id,
@@ -317,6 +321,14 @@ async def _run_catalog_mutation(
         session,
         rows=rows,
         variant_id_by_sku=variant_id_by_sku,
+    )
+    await _schedule_indexing_tasks(
+        session,
+        merchant_id=merchant_id,
+        rows=rows,
+        existing_product_keys=existing_product_keys,
+        semantic_by_key=semantic_by_key,
+        product_id_by_key=product_id_by_key,
     )
 
     total_rows = len(rows)
@@ -359,6 +371,82 @@ async def _run_catalog_mutation(
         updated_inventory_rows=updated_inventory_rows,
         error_count=0,
     )
+
+
+async def _load_semantic_values(
+    session: AsyncSession,
+    merchant_id: UUID,
+) -> dict[str, dict[str, object]]:
+    """Load stored semantic values per existing product key (SKU for MVP)."""
+    product_rows = (
+        await session.execute(
+            select(
+                Product.merchant_product_key,
+                Product.name,
+                Product.description,
+                Product.category,
+            ).where(Product.merchant_id == merchant_id)
+        )
+    ).all()
+    material_rows = (
+        await session.execute(
+            select(ProductVariant.merchant_sku, ProductVariant.material).where(
+                ProductVariant.merchant_id == merchant_id
+            )
+        )
+    ).all()
+
+    semantic_by_key: dict[str, dict[str, object]] = {}
+    for key, name, description, category in product_rows:
+        semantic_by_key[key] = {
+            "name": name,
+            "description": description,
+            "category": category,
+            "material": None,
+        }
+    for sku, material in material_rows:
+        if sku in semantic_by_key:
+            semantic_by_key[sku]["material"] = material
+    return semantic_by_key
+
+
+async def _schedule_indexing_tasks(
+    session: AsyncSession,
+    *,
+    merchant_id: UUID,
+    rows: Sequence[CatalogRow],
+    existing_product_keys: set[str],
+    semantic_by_key: Mapping[str, Mapping[str, object]],
+    product_id_by_key: Mapping[str, UUID],
+) -> None:
+    """Create one indexing task per row whose semantic values changed."""
+    for row in rows:
+        if row.merchant_sku in existing_product_keys:
+            before = semantic_by_key.get(row.merchant_sku)
+            if before is None:
+                changed_fields = SEMANTIC_PRODUCT_FIELDS
+            else:
+                changed_fields = semantic_changed_fields(
+                    before=before,
+                    after=_row_semantic_values(row),
+                )
+        else:
+            changed_fields = SEMANTIC_PRODUCT_FIELDS
+        await schedule_product_indexing(
+            session=session,
+            merchant_id=merchant_id,
+            product_id=product_id_by_key[row.merchant_sku],
+            changed_fields=changed_fields,
+        )
+
+
+def _row_semantic_values(row: CatalogRow) -> dict[str, object]:
+    return {
+        "name": row.product_name,
+        "description": row.description,
+        "category": row.category,
+        "material": row.material,
+    }
 
 
 async def _upsert_products(
