@@ -12,7 +12,3 @@ def test_naming_convention_keys() -> None:
     assert nc is not None
     for key in ("pk", "fk", "uq", "ck", "ix"):
         assert key in nc, f"Missing naming convention key: {key}"
-
-
-def test_no_tables_registered_yet() -> None:
-    assert len(Base.metadata.tables) == 0
