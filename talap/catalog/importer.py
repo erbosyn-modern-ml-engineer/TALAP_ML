@@ -29,6 +29,7 @@ from talap.db.models import (
 
 _MAX_FILENAME_LENGTH = 255
 _MUTATION_ERROR_MESSAGE = "Catalog import failed during database mutation."
+_VALIDATION_ERROR_MESSAGE = "Catalog import failed during validation."
 
 
 async def import_catalog_csv(
@@ -75,7 +76,22 @@ async def import_catalog_csv(
         )
         await session.commit()
 
-    parse_result = parse_catalog_csv(content)
+    try:
+        parse_result = parse_catalog_csv(content)
+    except Exception as exc:
+        try:
+            async with factory() as session:
+                await _mark_failed_with_safe_error(
+                    session,
+                    import_id=import_id,
+                    message=_VALIDATION_ERROR_MESSAGE,
+                )
+        except Exception:
+            # Recovery persistence failed (e.g., database unavailable). The
+            # import may remain VALIDATING; the original parser error must
+            # not be hidden behind the recovery failure.
+            pass
+        raise CatalogImportExecutionError(_VALIDATION_ERROR_MESSAGE) from exc
 
     if parse_result.errors:
         errors = [_parse_error_to_model(import_id, error) for error in parse_result.errors]
@@ -134,8 +150,18 @@ async def import_catalog_csv(
                 rows=parse_result.rows,
             )
     except Exception as exc:
-        async with factory() as session:
-            await _mark_mutation_failed(session, import_id=import_id)
+        try:
+            async with factory() as session:
+                await _mark_failed_with_safe_error(
+                    session,
+                    import_id=import_id,
+                    message=_MUTATION_ERROR_MESSAGE,
+                )
+        except Exception:
+            # Recovery persistence failed (e.g., database unavailable). The
+            # import may remain IMPORTING until a future reconciliation step;
+            # the original mutation error must not be hidden.
+            pass
         raise CatalogImportExecutionError(_MUTATION_ERROR_MESSAGE) from exc
 
 
@@ -224,7 +250,12 @@ async def _mark_failed(
     await session.commit()
 
 
-async def _mark_mutation_failed(session: AsyncSession, *, import_id: UUID) -> None:
+async def _mark_failed_with_safe_error(
+    session: AsyncSession,
+    *,
+    import_id: UUID,
+    message: str,
+) -> None:
     await session.execute(
         update(CatalogImport)
         .where(CatalogImport.id == import_id)
@@ -234,7 +265,7 @@ async def _mark_mutation_failed(session: AsyncSession, *, import_id: UUID) -> No
         CatalogImportError(
             catalog_import_id=import_id,
             code="catalog_import_failed",
-            message=_MUTATION_ERROR_MESSAGE,
+            message=message,
         )
     )
     await session.commit()
@@ -271,90 +302,21 @@ async def _run_catalog_mutation(
         ).scalars()
     )
 
-    product_rows: list[dict[str, object]] = []
-    for row in rows:
-        product_rows.append(
-            {
-                "id": uuid4(),
-                "merchant_id": merchant_id,
-                "merchant_product_key": row.merchant_sku,
-                "name": row.product_name,
-                "category": row.category,
-                "description": row.description,
-                "active": row.active,
-            }
-        )
-    product_stmt = insert(Product).values(product_rows)
-    product_result = await session.execute(
-        product_stmt.on_conflict_do_update(
-            constraint="uq_products_merchant_product_key",
-            set_={
-                "name": product_stmt.excluded.name,
-                "category": product_stmt.excluded.category,
-                "description": product_stmt.excluded.description,
-                "active": product_stmt.excluded.active,
-                "updated_at": func.now(),
-            },
-        ).returning(Product.id, Product.merchant_product_key)
+    product_id_by_key = await _upsert_products(
+        session,
+        merchant_id=merchant_id,
+        rows=rows,
     )
-    product_id_by_key: dict[str, UUID] = {}
-    for product_id, product_key in product_result.all():
-        product_id_by_key[product_key] = product_id
-
-    variant_rows: list[dict[str, object]] = []
-    for row in rows:
-        variant_rows.append(
-            {
-                "id": uuid4(),
-                "merchant_id": merchant_id,
-                "product_id": product_id_by_key[row.merchant_sku],
-                "merchant_sku": row.merchant_sku,
-                "size": row.size,
-                "color": row.color,
-                "material": row.material,
-                "price_kzt": row.price_kzt,
-                "image_url": row.image_url,
-                "active": row.active,
-            }
-        )
-    variant_stmt = insert(ProductVariant).values(variant_rows)
-    variant_result = await session.execute(
-        variant_stmt.on_conflict_do_update(
-            constraint="uq_product_variants_merchant_sku",
-            set_={
-                "product_id": variant_stmt.excluded.product_id,
-                "size": variant_stmt.excluded.size,
-                "color": variant_stmt.excluded.color,
-                "material": variant_stmt.excluded.material,
-                "price_kzt": variant_stmt.excluded.price_kzt,
-                "image_url": variant_stmt.excluded.image_url,
-                "active": variant_stmt.excluded.active,
-                "updated_at": func.now(),
-            },
-        ).returning(ProductVariant.id, ProductVariant.merchant_sku)
+    variant_id_by_sku = await _upsert_variants(
+        session,
+        merchant_id=merchant_id,
+        rows=rows,
+        product_id_by_key=product_id_by_key,
     )
-    variant_id_by_sku: dict[str, UUID] = {}
-    for variant_id, sku in variant_result.all():
-        variant_id_by_sku[sku] = variant_id
-
-    inventory_rows: list[dict[str, object]] = []
-    for row in rows:
-        inventory_rows.append(
-            {
-                "id": uuid4(),
-                "product_variant_id": variant_id_by_sku[row.merchant_sku],
-                "stock_quantity": row.stock_quantity,
-            }
-        )
-    inventory_stmt = insert(Inventory).values(inventory_rows)
-    await session.execute(
-        inventory_stmt.on_conflict_do_update(
-            constraint="uq_inventory_product_variant_id",
-            set_={
-                "stock_quantity": inventory_stmt.excluded.stock_quantity,
-                "updated_at": func.now(),
-            },
-        )
+    await _upsert_inventory(
+        session,
+        rows=rows,
+        variant_id_by_sku=variant_id_by_sku,
     )
 
     total_rows = len(rows)
@@ -396,6 +358,119 @@ async def _run_catalog_mutation(
         updated_variants=updated_variants,
         updated_inventory_rows=updated_inventory_rows,
         error_count=0,
+    )
+
+
+async def _upsert_products(
+    session: AsyncSession,
+    *,
+    merchant_id: UUID,
+    rows: Sequence[CatalogRow],
+) -> dict[str, UUID]:
+    """Batch upsert Products; return ``{merchant_product_key: id}``."""
+    product_rows: list[dict[str, object]] = []
+    for row in rows:
+        product_rows.append(
+            {
+                "id": uuid4(),
+                "merchant_id": merchant_id,
+                "merchant_product_key": row.merchant_sku,
+                "name": row.product_name,
+                "category": row.category,
+                "description": row.description,
+                "active": row.active,
+            }
+        )
+    product_stmt = insert(Product).values(product_rows)
+    product_result = await session.execute(
+        product_stmt.on_conflict_do_update(
+            constraint="uq_products_merchant_product_key",
+            set_={
+                "name": product_stmt.excluded.name,
+                "category": product_stmt.excluded.category,
+                "description": product_stmt.excluded.description,
+                "active": product_stmt.excluded.active,
+                "updated_at": func.now(),
+            },
+        ).returning(Product.id, Product.merchant_product_key)
+    )
+    product_id_by_key: dict[str, UUID] = {}
+    for product_id, product_key in product_result.all():
+        product_id_by_key[product_key] = product_id
+    return product_id_by_key
+
+
+async def _upsert_variants(
+    session: AsyncSession,
+    *,
+    merchant_id: UUID,
+    rows: Sequence[CatalogRow],
+    product_id_by_key: dict[str, UUID],
+) -> dict[str, UUID]:
+    """Batch upsert ProductVariants; return ``{merchant_sku: id}``."""
+    variant_rows: list[dict[str, object]] = []
+    for row in rows:
+        variant_rows.append(
+            {
+                "id": uuid4(),
+                "merchant_id": merchant_id,
+                "product_id": product_id_by_key[row.merchant_sku],
+                "merchant_sku": row.merchant_sku,
+                "size": row.size,
+                "color": row.color,
+                "material": row.material,
+                "price_kzt": row.price_kzt,
+                "image_url": row.image_url,
+                "active": row.active,
+            }
+        )
+    variant_stmt = insert(ProductVariant).values(variant_rows)
+    variant_result = await session.execute(
+        variant_stmt.on_conflict_do_update(
+            constraint="uq_product_variants_merchant_sku",
+            set_={
+                "product_id": variant_stmt.excluded.product_id,
+                "size": variant_stmt.excluded.size,
+                "color": variant_stmt.excluded.color,
+                "material": variant_stmt.excluded.material,
+                "price_kzt": variant_stmt.excluded.price_kzt,
+                "image_url": variant_stmt.excluded.image_url,
+                "active": variant_stmt.excluded.active,
+                "updated_at": func.now(),
+            },
+        ).returning(ProductVariant.id, ProductVariant.merchant_sku)
+    )
+    variant_id_by_sku: dict[str, UUID] = {}
+    for variant_id, sku in variant_result.all():
+        variant_id_by_sku[sku] = variant_id
+    return variant_id_by_sku
+
+
+async def _upsert_inventory(
+    session: AsyncSession,
+    *,
+    rows: Sequence[CatalogRow],
+    variant_id_by_sku: dict[str, UUID],
+) -> None:
+    """Batch upsert Inventory rows keyed by ``product_variant_id``."""
+    inventory_rows: list[dict[str, object]] = []
+    for row in rows:
+        inventory_rows.append(
+            {
+                "id": uuid4(),
+                "product_variant_id": variant_id_by_sku[row.merchant_sku],
+                "stock_quantity": row.stock_quantity,
+            }
+        )
+    inventory_stmt = insert(Inventory).values(inventory_rows)
+    await session.execute(
+        inventory_stmt.on_conflict_do_update(
+            constraint="uq_inventory_product_variant_id",
+            set_={
+                "stock_quantity": inventory_stmt.excluded.stock_quantity,
+                "updated_at": func.now(),
+            },
+        )
     )
 
 
