@@ -1,3 +1,13 @@
-from apps.api.schemas.catalog import CatalogImportResponse
+from apps.api.schemas.catalog import (
+    CatalogImportResponse,
+    ProductCreateRequest,
+    ProductPatchRequest,
+    ProductResponse,
+)
 
-__all__ = ["CatalogImportResponse"]
+__all__ = [
+    "CatalogImportResponse",
+    "ProductCreateRequest",
+    "ProductPatchRequest",
+    "ProductResponse",
+]

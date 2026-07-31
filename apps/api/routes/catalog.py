@@ -16,7 +16,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from apps.api.dependencies.auth import require_internal_service_token
 from apps.api.dependencies.database import get_api_session_factory
-from apps.api.schemas.catalog import CatalogImportResponse
+from apps.api.schemas.catalog import (
+    CatalogImportResponse,
+    ProductCreateRequest,
+    ProductPatchRequest,
+    ProductResponse,
+)
+from apps.api.services import catalog as catalog_service
+from apps.api.services.catalog import (
+    ProductAlreadyExistsError,
+    ProductNotFoundError,
+    ProductStateError,
+    ProductWriteError,
+)
 from talap.catalog import (
     CatalogImportExecutionError,
     MerchantInactiveError,
@@ -106,6 +118,87 @@ async def get_catalog_import(
             )
         ).scalar_one()
     return CatalogImportResponse.from_import_record(import_record, error_count)
+
+
+@router.post(
+    "/merchants/{merchant_id}/products",
+    response_model=ProductResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_product(
+    merchant_id: UUID,
+    payload: ProductCreateRequest,
+    response: Response,
+    _auth: None = Depends(require_internal_service_token),
+    _session_factory: async_sessionmaker[AsyncSession] = Depends(get_api_session_factory),
+) -> ProductResponse:
+    try:
+        result = await catalog_service.create_product(
+            merchant_id=merchant_id,
+            payload=payload,
+            session_factory=_session_factory,
+        )
+    except MerchantNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Merchant not found.",
+        ) from exc
+    except (MerchantInactiveError, ProductAlreadyExistsError) as exc:
+        detail = (
+            "Merchant is inactive."
+            if isinstance(exc, MerchantInactiveError)
+            else "A product with this merchant SKU already exists."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
+        ) from exc
+    except ProductWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Product could not be saved.",
+        ) from exc
+
+    response.headers["Location"] = f"/api/v1/products/{result.product_id}"
+    return result
+
+
+@router.patch(
+    "/products/{product_id}",
+    response_model=ProductResponse,
+)
+async def patch_product(
+    product_id: UUID,
+    payload: ProductPatchRequest,
+    _auth: None = Depends(require_internal_service_token),
+    _session_factory: async_sessionmaker[AsyncSession] = Depends(get_api_session_factory),
+) -> ProductResponse:
+    try:
+        return await catalog_service.patch_product(
+            product_id=product_id,
+            payload=payload,
+            session_factory=_session_factory,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found.",
+        ) from exc
+    except ProductStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Product catalog state is inconsistent.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except ProductWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Product could not be saved.",
+        ) from exc
 
 
 async def _read_upload(file: UploadFile) -> bytes:
