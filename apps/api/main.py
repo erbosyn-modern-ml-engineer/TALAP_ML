@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 
+from apps.api.routes import catalog_router
+
 app = FastAPI(
     title="TALAP AI Backend",
     version="0.1.0",
@@ -10,3 +12,6 @@ app = FastAPI(
 @app.get("/health/live", tags=["health"])
 async def liveness() -> dict[str, str]:
     return {"status": "ok"}
+
+
+app.include_router(catalog_router)
