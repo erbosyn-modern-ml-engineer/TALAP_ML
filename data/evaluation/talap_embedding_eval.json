@@ -1,0 +1,520 @@
+{
+  "version": 2,
+  "description": "Synthetic Kazakh/Russian product-search benchmark for offline embedding-provider evaluation. Single-language documents avoid cross-language leakage; retrieval_scenario marks same_language, cross_language, and mixed queries. Demo catalog data only; no personal or customer data.",
+  "products": [
+    {
+      "product_id": "p001",
+      "name": "Школьный рюкзак",
+      "category": "school",
+      "description": "Водонепроницаемый школьный рюкзак с ортопедической спинкой, отделением для ноутбука и боковыми карманами.",
+      "material": "Полиэстер",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p002",
+      "name": "Тетрадь 96 листов",
+      "category": "stationery",
+      "description": "Тетрадь 96 листов в клетку и линейку, плотная обложка, белая бумага.",
+      "material": "Бумага",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p003",
+      "name": "Шариковая ручка синяя",
+      "category": "stationery",
+      "description": "Шариковая ручка с синими чернилами, пишущий узел 0.7 мм, удобный корпус.",
+      "material": "Пластик",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p004",
+      "name": "Простой карандаш HB",
+      "category": "stationery",
+      "description": "Простой карандаш твердости HB с ластиком на конце.",
+      "material": "Дерево",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p005",
+      "name": "Школьный костюм для мальчика",
+      "category": "uniform",
+      "description": "Школьный костюм для мальчика: пиджак и брюки, тёмно-синий, классический крой.",
+      "material": "Ткань",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p006",
+      "name": "Белая рубашка",
+      "category": "uniform",
+      "description": "Белая рубашка для школьной формы, хлопок, длинный рукав.",
+      "material": "Хлопок",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p007",
+      "name": "Набор акварельных красок",
+      "category": "stationery",
+      "description": "Набор акварельных красок 12 цветов для рисования.",
+      "material": "Краска",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p008",
+      "name": "Линейка прозрачная 30 см",
+      "category": "stationery",
+      "description": "Прозрачная пластиковая линейка 30 см для школы.",
+      "material": "Пластик",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p009",
+      "name": "Ластик",
+      "category": "stationery",
+      "description": "Белый ластик для карандаша, не оставляет следов на бумаге.",
+      "material": "Резина",
+      "document_language": "ru"
+    },
+    {
+      "product_id": "p010",
+      "name": "Мектеп сөмкесі",
+      "category": "school",
+      "description": "Су өткізбейтін, ортопедиялық арқалықты мектеп сөмкесі, ноутбук бөлігі және бүйір қалталары бар.",
+      "material": "Полиэстер",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p011",
+      "name": "96 беттік дәптер",
+      "category": "stationery",
+      "description": "Клеткалы және сызықты 96 беттік дәптер, тығыз мұқаба, ақ қағаз.",
+      "material": "Қағаз",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p012",
+      "name": "Көк қалам",
+      "category": "stationery",
+      "description": "Көк сиялы қалам, 0.7 мм жазу түйіні, ыңғайлы корпус.",
+      "material": "Пластмасса",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p013",
+      "name": "HB қарындаш",
+      "category": "stationery",
+      "description": "Қаттылығы HB қарапайым қарындаш, ұшында өшіргіші бар.",
+      "material": "Ағаш",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p014",
+      "name": "Мектеп формасы",
+      "category": "uniform",
+      "description": "Балаға арналған мектеп костюмі: пиджак және шалбар, қою көк, классикалық қиюы.",
+      "material": "Мата",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p015",
+      "name": "Ақ көйлек",
+      "category": "uniform",
+      "description": "Мектеп формасына арналған ақ көйлек, мақта, ұзын жең.",
+      "material": "Мақта",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p016",
+      "name": "Акварель бояулар жиынтығы",
+      "category": "stationery",
+      "description": "Сурет салуға арналған 12 түсті акварель бояулар жиынтығы.",
+      "material": "Бояу",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p017",
+      "name": "Мөлдір сызғыш 30 см",
+      "category": "stationery",
+      "description": "Мектепке арналған 30 см мөлдір пластик сызғыш.",
+      "material": "Пластмасса",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p018",
+      "name": "Өшіргіш",
+      "category": "stationery",
+      "description": "Қарындашқа арналған ақ өшіргіш, қағазда із қалдырмайды.",
+      "material": "Резеңке",
+      "document_language": "kk"
+    },
+    {
+      "product_id": "p019",
+      "name": "Пенал / Пенал",
+      "category": "stationery",
+      "description": "Пенал на молнии из плотной ткани для ручек и карандашей. / Қалам мен қарындашқа арналған, тығыз матадан жасалған сыдырмалы пенал.",
+      "material": "Мата / Ткань",
+      "document_language": "bilingual"
+    },
+    {
+      "product_id": "p020",
+      "name": "Альбом для рисования / Сурет альбомы",
+      "category": "stationery",
+      "description": "Альбом для рисования А4, 40 листов, плотная бумага. / Сурет салуға арналған А4 альбом, 40 парақ, тығыз қағаз.",
+      "material": "Бумага / Қағаз",
+      "document_language": "bilingual"
+    },
+    {
+      "product_id": "p021",
+      "name": "Атлас по географии / География атласы",
+      "category": "books",
+      "description": "Иллюстрированный атлас по географии для школьников. / Оқушыларға арналған суретті география атласы.",
+      "material": "Бумага / Қағаз",
+      "document_language": "bilingual"
+    },
+    {
+      "product_id": "p022",
+      "name": "Дневник / Күнделік",
+      "category": "school",
+      "description": "Школьный дневник в твёрдой обложке с расписанием уроков. / Сабақ кестесі бар, қатты мұқабалы мектеп күнделігі.",
+      "material": "Картон",
+      "document_language": "bilingual"
+    },
+    {
+      "product_id": "p023",
+      "name": "Спортивная форма / Спорт формасы",
+      "category": "sport",
+      "description": "Спортивная форма для уроков физкультуры: футболка и шорты. / Дене шынықтыру сабағына арналған спорт формасы: футболка және шорт.",
+      "material": "Хлопок / Мақта",
+      "document_language": "bilingual"
+    },
+    {
+      "product_id": "p024",
+      "name": "Учебник математики / Математика оқулығы",
+      "category": "books",
+      "description": "Учебник математики для 5 класса, школьная программа. / 5-сыныпқа арналған математика оқулығы, мектеп бағдарламасы.",
+      "material": "Бумага / Қағаз",
+      "document_language": "bilingual"
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q001",
+      "query": "мектеп сөмкесі",
+      "relevant_product_ids": ["p010"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only school backpack."
+    },
+    {
+      "query_id": "q002",
+      "query": "96 беттік дәптер",
+      "relevant_product_ids": ["p011"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only notebook."
+    },
+    {
+      "query_id": "q003",
+      "query": "көк қалам",
+      "relevant_product_ids": ["p012"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only pen."
+    },
+    {
+      "query_id": "q004",
+      "query": "hb қарындаш",
+      "relevant_product_ids": ["p013"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only pencil."
+    },
+    {
+      "query_id": "q005",
+      "query": "мектеп формасы балаға",
+      "relevant_product_ids": ["p014"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only uniform."
+    },
+    {
+      "query_id": "q006",
+      "query": "ақ көйлек",
+      "relevant_product_ids": ["p015"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only white shirt."
+    },
+    {
+      "query_id": "q007",
+      "query": "акварель бояулар",
+      "relevant_product_ids": ["p016"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for Kazakh-only watercolors."
+    },
+    {
+      "query_id": "q008",
+      "query": "мөлдір сызғыш",
+      "relevant_product_ids": ["p017"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only ruler."
+    },
+    {
+      "query_id": "q009",
+      "query": "сумка мектеп үшін",
+      "relevant_product_ids": ["p001"],
+      "language": "kk",
+      "retrieval_scenario": "cross_language",
+      "notes": "Kazakh query targeting a Russian-only backpack document."
+    },
+    {
+      "query_id": "q010",
+      "query": "қалам көк",
+      "relevant_product_ids": ["p003"],
+      "language": "kk",
+      "retrieval_scenario": "cross_language",
+      "notes": "Kazakh query targeting a Russian-only pen document."
+    },
+    {
+      "query_id": "q011",
+      "query": "өшіргіш сатып алу",
+      "relevant_product_ids": ["p009"],
+      "language": "kk",
+      "retrieval_scenario": "cross_language",
+      "notes": "Kazakh query targeting a Russian-only eraser document."
+    },
+    {
+      "query_id": "q012",
+      "query": "школьный рюкзак для первоклассника",
+      "relevant_product_ids": ["p001"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only backpack."
+    },
+    {
+      "query_id": "q013",
+      "query": "тетрадь 96 листов в клетку",
+      "relevant_product_ids": ["p002"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only notebook."
+    },
+    {
+      "query_id": "q014",
+      "query": "синяя шариковая ручка",
+      "relevant_product_ids": ["p003"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only pen."
+    },
+    {
+      "query_id": "q015",
+      "query": "простой карандаш для школы",
+      "relevant_product_ids": ["p004"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only pencil."
+    },
+    {
+      "query_id": "q016",
+      "query": "школьный костюм для мальчика",
+      "relevant_product_ids": ["p005"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only uniform."
+    },
+    {
+      "query_id": "q017",
+      "query": "белая рубашка в школу",
+      "relevant_product_ids": ["p006"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only shirt."
+    },
+    {
+      "query_id": "q018",
+      "query": "акварельные краски для рисования",
+      "relevant_product_ids": ["p007"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for Russian-only watercolors."
+    },
+    {
+      "query_id": "q019",
+      "query": "прозрачная линейка 30 см",
+      "relevant_product_ids": ["p008"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only ruler."
+    },
+    {
+      "query_id": "q020",
+      "query": "рюкзак школьный",
+      "relevant_product_ids": ["p010"],
+      "language": "ru",
+      "retrieval_scenario": "cross_language",
+      "notes": "Russian query targeting a Kazakh-only backpack document."
+    },
+    {
+      "query_id": "q021",
+      "query": "тетрадь в клетку",
+      "relevant_product_ids": ["p011"],
+      "language": "ru",
+      "retrieval_scenario": "cross_language",
+      "notes": "Russian query targeting a Kazakh-only notebook document."
+    },
+    {
+      "query_id": "q022",
+      "query": "ластик для карандаша",
+      "relevant_product_ids": ["p018"],
+      "language": "ru",
+      "retrieval_scenario": "cross_language",
+      "notes": "Russian query targeting a Kazakh-only eraser document."
+    },
+    {
+      "query_id": "q023",
+      "query": "пенал для ручек / қаламсауыт",
+      "relevant_product_ids": ["p019"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for a bilingual pencil case."
+    },
+    {
+      "query_id": "q024",
+      "query": "альбом для рисования / сурет альбомы",
+      "relevant_product_ids": ["p020"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for a bilingual drawing album."
+    },
+    {
+      "query_id": "q025",
+      "query": "атлас география бойынша",
+      "relevant_product_ids": ["p021"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for a bilingual geography atlas."
+    },
+    {
+      "query_id": "q026",
+      "query": "дневник школьника / күнделік",
+      "relevant_product_ids": ["p022"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for a bilingual school diary."
+    },
+    {
+      "query_id": "q027",
+      "query": "спортивная форма / дене шынықтыру",
+      "relevant_product_ids": ["p023"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for a bilingual sports uniform."
+    },
+    {
+      "query_id": "q028",
+      "query": "учебник математики 5 класс / оқулық",
+      "relevant_product_ids": ["p024"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for a bilingual math textbook."
+    },
+    {
+      "query_id": "q029",
+      "query": "оқушыға арналған сөмке",
+      "relevant_product_ids": ["p010"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only backpack."
+    },
+    {
+      "query_id": "q030",
+      "query": "қағаз дәптер",
+      "relevant_product_ids": ["p011"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only paper notebook."
+    },
+    {
+      "query_id": "q031",
+      "query": "ручка для школы",
+      "relevant_product_ids": ["p003"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only pen."
+    },
+    {
+      "query_id": "q032",
+      "query": "карандаш для рисования",
+      "relevant_product_ids": ["p004"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only pencil."
+    },
+    {
+      "query_id": "q033",
+      "query": "балаларға арналған форма",
+      "relevant_product_ids": ["p014"],
+      "language": "kk",
+      "retrieval_scenario": "same_language",
+      "notes": "Kazakh query for a Kazakh-only children uniform."
+    },
+    {
+      "query_id": "q034",
+      "query": "рубашка для мальчика",
+      "relevant_product_ids": ["p006"],
+      "language": "ru",
+      "retrieval_scenario": "same_language",
+      "notes": "Russian query for a Russian-only shirt."
+    },
+    {
+      "query_id": "q035",
+      "query": "ручка сатып алу",
+      "relevant_product_ids": ["p003"],
+      "language": "kk",
+      "retrieval_scenario": "cross_language",
+      "notes": "Kazakh query targeting a Russian-only pen document."
+    },
+    {
+      "query_id": "q036",
+      "query": "школьная форма",
+      "relevant_product_ids": ["p014"],
+      "language": "ru",
+      "retrieval_scenario": "cross_language",
+      "notes": "Russian query targeting a Kazakh-only uniform document."
+    },
+    {
+      "query_id": "q037",
+      "query": "линейка 30 см",
+      "relevant_product_ids": ["p008"],
+      "language": "kk",
+      "retrieval_scenario": "cross_language",
+      "notes": "Kazakh query targeting a Russian-only ruler document."
+    },
+    {
+      "query_id": "q038",
+      "query": "рюкзак с ортопедической спинкой",
+      "relevant_product_ids": ["p010"],
+      "language": "ru",
+      "retrieval_scenario": "cross_language",
+      "notes": "Russian query targeting a Kazakh-only backpack document."
+    },
+    {
+      "query_id": "q039",
+      "query": "канцелярия для школы / мектеп кеңсесі",
+      "relevant_product_ids": ["p019", "p020"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for bilingual pencil case and album."
+    },
+    {
+      "query_id": "q040",
+      "query": "форма и учебники / форма мен оқулықтар",
+      "relevant_product_ids": ["p023", "p024"],
+      "language": "mixed",
+      "retrieval_scenario": "mixed",
+      "notes": "Mixed query for bilingual sports uniform and math textbook."
+    }
+  ]
+}
