@@ -1,0 +1,28 @@
+# TALAP Alembic migrations
+
+Asynchronous PostgreSQL configuration.
+
+## Database selection
+
+The environment resolves the target database from the `-x database=...` argument:
+
+- `main` (or omitted) -> `Settings.database_url`
+- `test`                -> `Settings.test_database_url`
+- anything else         -> `ValueError`
+
+The real URL is never stored in `alembic.ini`; it comes from the application
+Settings (`.env`).
+
+## Examples
+
+    python -m alembic -x database=test upgrade head
+    python -m alembic -x database=test downgrade base
+    python -m alembic -x database=test revision --autogenerate -m "change"
+    python -m alembic -x database=main upgrade head
+
+## Notes
+
+- The `catalog_import_status` PostgreSQL enum is managed explicitly by the
+  initial migration because the ORM column uses `create_type=False`.
+- `updated_at` is maintained by the ORM `onupdate=func.now()`, not by a
+  database trigger.
