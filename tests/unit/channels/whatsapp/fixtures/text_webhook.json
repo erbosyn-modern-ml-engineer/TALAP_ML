@@ -1,0 +1,37 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "999999999999999",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550000000",
+              "phone_number_id": "100000000000001"
+            },
+            "contacts": [
+              {
+                "profile": {"name": "Demo"},
+                "wa_id": "77000000001"
+              }
+            ],
+            "messages": [
+              {
+                "from": "77000000001",
+                "id": "wamid.SYNTHETIC_TEXT_0001",
+                "timestamp": "1783022400",
+                "type": "text",
+                "text": {
+                  "body": "Show me blue sneakers"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
