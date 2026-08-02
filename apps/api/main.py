@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 
-from apps.api.routes import catalog_router, telegram_webhook_router
+from apps.api.routes import (
+    catalog_router,
+    telegram_webhook_router,
+    whatsapp_webhook_router,
+)
 
 app = FastAPI(
     title="TALAP AI Backend",
@@ -15,6 +19,7 @@ async def liveness() -> dict[str, str]:
 
 
 app.include_router(catalog_router)
-# Registered separately (no /api/v1 prefix) so the external webhook path is
-# exactly /webhooks/telegram/{connection_id}.
+# Registered separately (no /api/v1 prefix) so the external webhook paths are
+# exactly /webhooks/telegram/{connection_id} and /webhooks/whatsapp.
 app.include_router(telegram_webhook_router)
+app.include_router(whatsapp_webhook_router)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from uuid import UUID
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -61,6 +62,11 @@ class Settings(BaseSettings):
     meta_phone_number_id: str | None = None
     meta_whatsapp_business_account_id: str | None = None
 
+    # ── WhatsApp webhook MVP (single-account) ───────────────────────────
+    whatsapp_connection_id: UUID | None = None
+    whatsapp_verify_token: SecretStr | None = None
+    whatsapp_app_secret: SecretStr | None = None
+
     # ── Telegram Bot API ────────────────────────────────────────────────
     telegram_bot_token: SecretStr | None = None
     telegram_webhook_secret: SecretStr | None = None
@@ -86,6 +92,8 @@ class Settings(BaseSettings):
         "telegram_webhook_secret",
         "internal_service_token",
         "jina_api_key",
+        "whatsapp_verify_token",
+        "whatsapp_app_secret",
         mode="before",
     )
     @classmethod
