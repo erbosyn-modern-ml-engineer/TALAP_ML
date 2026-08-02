@@ -1,0 +1,26 @@
+{
+  "update_id": 1000004,
+  "message": {
+    "message_id": 41004,
+    "from": {
+      "id": 771100004,
+      "is_bot": false,
+      "first_name": "Demo"
+    },
+    "chat": {
+      "id": 771100004,
+      "type": "private"
+    },
+    "date": 1783022403,
+    "sticker": {
+      "file_id": "StickerFileIdDemo001",
+      "file_unique_id": "StickerFileUniqueIdDemo001",
+      "type": "regular",
+      "width": 512,
+      "height": 512,
+      "is_animated": false,
+      "is_video": false,
+      "emoji": "👍"
+    }
+  }
+}

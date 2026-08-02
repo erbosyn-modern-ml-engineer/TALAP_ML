@@ -1,0 +1,23 @@
+{
+  "update_id": 1000002,
+  "message": {
+    "message_id": 41002,
+    "from": {
+      "id": 771100002,
+      "is_bot": false,
+      "first_name": "Demo"
+    },
+    "chat": {
+      "id": 771100002,
+      "type": "private"
+    },
+    "date": 1783022401,
+    "voice": {
+      "file_id": "VoiceFileIdDemo001",
+      "file_unique_id": "VoiceFileUniqueIdDemo001",
+      "duration": 3,
+      "mime_type": "audio/ogg",
+      "file_size": 25121
+    }
+  }
+}

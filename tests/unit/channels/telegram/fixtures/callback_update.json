@@ -1,0 +1,26 @@
+{
+  "update_id": 1000003,
+  "callback_query": {
+    "id": "722200001",
+    "from": {
+      "id": 771100003,
+      "is_bot": false,
+      "first_name": "Demo"
+    },
+    "message": {
+      "message_id": 41003,
+      "from": {
+        "id": 900000000,
+        "is_bot": true
+      },
+      "chat": {
+        "id": 771100003,
+        "type": "private"
+      },
+      "date": 1783022402,
+      "text": "Pick an option"
+    },
+    "chat_instance": "3829450123456789",
+    "data": "product:sku-blue-sneakers"
+  }
+}
