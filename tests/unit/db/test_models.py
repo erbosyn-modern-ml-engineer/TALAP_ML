@@ -27,6 +27,7 @@ def test_all_expected_tables_are_registered() -> None:
         "inbound_events",
         "inbound_messages",
         "message_processing_jobs",
+        "telegram_webhook_configs",
         "whatsapp_delivery_statuses",
     }
     actual = set(Base.metadata.tables)
@@ -489,7 +490,7 @@ def test_postgresql_ddl_compiles() -> None:
     for name, table in tables.items():
         ddl[name] = str(CreateTable(table).compile(dialect=postgresql.dialect()))
 
-    assert len(ddl) == 13
+    assert len(ddl) == 14
 
     # PostgreSQL UUID types on every primary key
     for tname in ddl:
@@ -553,8 +554,16 @@ def test_model_timestamp_shape() -> None:
             assert "created_at" in tables[tname].columns
             assert "updated_at" in tables[tname].columns
 
-    # Every table has exactly one id
+    # Every table has exactly one primary-key id column, except
+    # telegram_webhook_configs which uses connection_id as its PK.
     for tname in tables:
+        if tname == "telegram_webhook_configs":
+            assert "connection_id" in tables[tname].columns
+            conn_col = tables[tname].columns["connection_id"]
+            assert conn_col.primary_key, (
+                "telegram_webhook_configs.connection_id must be primary key"
+            )
+            continue
         assert "id" in tables[tname].columns
         # id is primary key
         col = tables[tname].columns["id"]
@@ -931,6 +940,89 @@ def test_inbound_ddl_compiles() -> None:
     assert "CREATE TYPE" not in ddl["message_processing_jobs"]
     assert "CHECK (message_type IN" in ddl["inbound_messages"]
     assert "CHECK (attempts >= 0)" in ddl["message_processing_jobs"]
+
+
+# ── Telegram webhook config model (T-022) ──────────────────────────────
+
+
+def test_telegram_webhook_config_metadata() -> None:
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+    table = tables["telegram_webhook_configs"]
+
+    assert "connection_id" in table.columns
+    assert table.columns["connection_id"].primary_key is True
+    assert "webhook_secret_sha256" in table.columns
+    assert "created_at" in table.columns
+    assert "updated_at" in table.columns
+    # No independent id, no token/plaintext secret columns.
+    assert "id" not in table.columns
+    assert "bot_token" not in table.columns
+    assert "webhook_secret" not in table.columns
+    assert "access_token" not in table.columns
+
+    assert _has_check_constraint(
+        table, "ck_telegram_webhook_configs_secret_sha256_length"
+    )
+
+    fks = [
+        c
+        for c in table.constraints
+        if isinstance(c, ForeignKeyConstraint)
+    ]
+    assert len(fks) == 1
+    fk = fks[0]
+    assert fk.name == "fk_telegram_webhook_configs_connection"
+    assert {col.name for col in fk.columns} == {"connection_id"}
+    assert fk.ondelete == "CASCADE"
+    assert fk.elements[0].column.table.name == "channel_connections"
+    assert fk.elements[0].column.name == "id"
+
+    # SHA-256 column is varchar(64)
+    assert table.columns["webhook_secret_sha256"].type.length == 64
+
+
+def test_telegram_webhook_config_relationship_contract() -> None:
+    import talap.db.models  # noqa: F401
+
+    configure_mappers()
+
+    connection_mapper = class_mapper(
+        Base.registry._class_registry["ChannelConnection"]
+    )
+    rel = connection_mapper.relationships["telegram_webhook_config"]
+    assert rel.uselist is False, (
+        "ChannelConnection.telegram_webhook_config must be one-to-one"
+    )
+    assert rel.passive_deletes is True
+    assert rel.back_populates == "connection"
+    assert rel.backref is None
+    assert "delete" not in rel.cascade
+
+    config_mapper = class_mapper(
+        Base.registry._class_registry["TelegramWebhookConfig"]
+    )
+    connection_rel = config_mapper.relationships["connection"]
+    assert connection_rel.passive_deletes is True
+    assert connection_rel.back_populates == "telegram_webhook_config"
+    assert connection_rel.backref is None
+
+
+def test_telegram_webhook_config_ddl_compiles() -> None:
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
+
+    import talap.db.models  # noqa: F401
+
+    ddl = str(
+        CreateTable(Base.metadata.tables["telegram_webhook_configs"]).compile(
+            dialect=postgresql.dialect()
+        )
+    )
+    assert "CHECK (length(webhook_secret_sha256) = 64)" in ddl
+    assert "FOREIGN KEY(connection_id)" in ddl
+    assert "ON DELETE CASCADE" in ddl
 
 
 # ── helpers ─────────────────────────────────────────────────────────────

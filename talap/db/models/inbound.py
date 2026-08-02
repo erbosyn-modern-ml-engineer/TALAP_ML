@@ -35,7 +35,7 @@ from talap.db.base import Base
 from talap.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
-    pass
+    from talap.db.models.telegram import TelegramWebhookConfig
 
 ChannelName = Literal["telegram", "whatsapp"]
 
@@ -85,6 +85,12 @@ class ChannelConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     whatsapp_delivery_statuses: Mapped[list[WhatsAppDeliveryStatus]] = relationship(
         "WhatsAppDeliveryStatus",
         back_populates="connection",
+    )
+    telegram_webhook_config: Mapped[TelegramWebhookConfig | None] = relationship(
+        "TelegramWebhookConfig",
+        back_populates="connection",
+        uselist=False,
+        passive_deletes=True,
     )
 
 

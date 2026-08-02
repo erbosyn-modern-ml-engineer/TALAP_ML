@@ -31,6 +31,7 @@ _APP_TABLES = (
     "whatsapp_delivery_statuses",
     "inbound_messages",
     "inbound_events",
+    "telegram_webhook_configs",
     "channel_connections",
     "catalog_import_errors",
     "catalog_imports",
