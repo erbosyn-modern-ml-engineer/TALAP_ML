@@ -29,6 +29,8 @@ def test_all_expected_tables_are_registered() -> None:
         "message_processing_jobs",
         "telegram_webhook_configs",
         "whatsapp_delivery_statuses",
+        "whatsapp_recommendation_states",
+        "unmet_demand",
     }
     actual = set(Base.metadata.tables)
     assert actual == expected, f"Expected {expected}, got {actual}"
@@ -490,7 +492,7 @@ def test_postgresql_ddl_compiles() -> None:
     for name, table in tables.items():
         ddl[name] = str(CreateTable(table).compile(dialect=postgresql.dialect()))
 
-    assert len(ddl) == 14
+    assert len(ddl) == 16
 
     # PostgreSQL UUID types on every primary key
     for tname in ddl:
@@ -643,6 +645,16 @@ def test_no_duplicate_or_missing_columns() -> None:
             "id", "merchant_id", "product_id", "status", "changed_fields",
             "attempts", "available_at", "started_at", "completed_at",
             "last_error", "created_at", "updated_at",
+        },
+        "whatsapp_recommendation_states": {
+            "id", "channel", "external_user_id", "displayed_products",
+            "status", "selected_product_id", "selected_index",
+            "source_message_id", "created_at", "updated_at",
+        },
+        "unmet_demand": {
+            "id", "channel", "external_user_id", "source_message_id",
+            "query_text", "category", "attributes", "budget_max_kzt",
+            "quantity", "language", "created_at", "updated_at",
         },
     }
 

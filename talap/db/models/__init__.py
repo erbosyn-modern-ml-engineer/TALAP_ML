@@ -12,6 +12,7 @@ from talap.db.models.inbound import (
 )
 from talap.db.models.indexing import ProductIndexingTask, ProductIndexingTaskStatus
 from talap.db.models.merchant import Merchant
+from talap.db.models.recommendations import UnmetDemand, WhatsAppRecommendationState
 from talap.db.models.telegram import TelegramWebhookConfig
 
 __all__ = [
@@ -33,5 +34,7 @@ __all__ = [
     "TelegramWebhookConfig",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
+    "UnmetDemand",
     "WhatsAppDeliveryStatus",
+    "WhatsAppRecommendationState",
 ]

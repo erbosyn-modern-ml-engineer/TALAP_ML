@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     whatsapp_phone_number_id: str | None = None
     whatsapp_graph_api_version: str = "v21.0"
 
+    # ── WhatsApp manager link (MVP-6) ───────────────────────────────────
+    manager_whatsapp_link: str | None = None
+
     # ── Telegram Bot API ────────────────────────────────────────────────
     telegram_bot_token: SecretStr | None = None
     telegram_webhook_secret: SecretStr | None = None

@@ -9,9 +9,9 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import apps.worker.jobs.whatsapp_echo as worker_module
 from apps.worker.jobs.whatsapp_echo import (
     CLARIFICATION_PREFIX,
-    NO_RESULTS_TEXT,
     RECOMMENDATION_HEADER,
     EchoOutcome,
     process_one_whatsapp_echo_job,
@@ -31,8 +31,17 @@ from talap.db.models import (
     InboundMessage,
     MessageProcessingJob,
     MessageProcessingJobStatus,
+    UnmetDemand,
+    WhatsAppRecommendationState,
 )
 from talap.ingestion import ingest_normalized_webhook
+from talap.recommendations import (
+    RECOMMENDATION_STATUS_ACTIVE,
+    RECOMMENDATION_STATUS_SELECTED,
+    RECOMMENDATION_STATUS_SUPERSEDED,
+    persist_unmet_demand,
+    unmet_demand_response,
+)
 from talap.search.products import ProductSearchResult
 
 _NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
@@ -404,17 +413,19 @@ async def test_search_receives_validated_request_with_limit_three(
 async def test_no_result_response_completes_job(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    _, job_id = await _seed_text_message(session_factory)
+    _, job_id = await _seed_text_message(session_factory, body="ненайденный товар")
     client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor(request=_product_request(query_text="ненайденный товар"))
     result = await process_one_whatsapp_echo_job(
         session_factory=session_factory,
         client=client,
-        extractor=_FakeExtractor(),
+        extractor=extractor,
         search=_FakeSearch(results=()),
         now=_NOW,
     )
     assert result.outcome == EchoOutcome.SENT
-    assert client.calls[0][1] == NO_RESULTS_TEXT
+    assert client.calls[0][1] == unmet_demand_response("ru")
+    assert await _count(session_factory, UnmetDemand) == 1
     job = await _load_job(session_factory, job_id)
     assert job.status == MessageProcessingJobStatus.COMPLETED
 
@@ -517,6 +528,360 @@ async def test_no_new_inbound_event_message_or_job_created(
     assert after == (before[0] + 1, before[1] + 1, before[2] + 1)
     assert after[1] == 1
     assert after[2] == 1
+
+
+# ── MVP-6: recommendation state, selection, unmet demand ───────────────
+
+
+async def _load_active_state(
+    session_factory: async_sessionmaker[AsyncSession],
+    external_user_id: str,
+) -> WhatsAppRecommendationState | None:
+    async with session_factory() as session:
+        return (
+            await session.execute(
+                select(WhatsAppRecommendationState).where(
+                    WhatsAppRecommendationState.channel == "whatsapp",
+                    WhatsAppRecommendationState.external_user_id == external_user_id,
+                    WhatsAppRecommendationState.status
+                    == RECOMMENDATION_STATUS_ACTIVE,
+                )
+            )
+        ).scalars().first()
+
+
+async def test_results_stored_as_active_recommendation_set(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _seed_text_message(
+        session_factory,
+        sender="77000000011",
+        external_message_id="wamid.MVP6_1",
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(
+            results=(_result("Кроссовки", 1000), _result("Ботинки", 2000))
+        ),
+        now=_NOW,
+    )
+    state = await _load_active_state(session_factory, "77000000011")
+    assert state is not None
+    assert len(state.displayed_products) == 2
+    assert await _count(session_factory, WhatsAppRecommendationState) == 1
+
+
+async def test_new_recommendation_supersedes_previous_active(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    sender = "77000000012"
+    await _seed_text_message(
+        session_factory, sender=sender, external_message_id="wamid.MVP6_2a"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(
+            results=(_result("Кроссовки", 1000), _result("Ботинки", 2000))
+        ),
+        now=_NOW,
+    )
+    await _seed_text_message(
+        session_factory, sender=sender, external_message_id="wamid.MVP6_2b"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=(_result("Футболка", 3000),)),
+        now=_NOW,
+    )
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(WhatsAppRecommendationState).where(
+                    WhatsAppRecommendationState.external_user_id == sender
+                )
+            )
+        ).scalars().all()
+    assert len(rows) == 2
+    assert {row.status for row in rows} == {
+        RECOMMENDATION_STATUS_ACTIVE,
+        RECOMMENDATION_STATUS_SUPERSEDED,
+    }
+    active = [row for row in rows if row.status == RECOMMENDATION_STATUS_ACTIVE][0]
+    assert len(active.displayed_products) == 1
+
+
+async def test_selection_one_resolves_displayed_product_with_manager_link(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: object,
+) -> None:
+    sender = "77000000013"
+    await _seed_text_message(
+        session_factory, sender=sender, external_message_id="wamid.MVP6_3a"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(
+            results=(_result("Кроссовки", 1000), _result("Ботинки", 2000))
+        ),
+        now=_NOW,
+    )
+    monkeypatch.setattr(
+        worker_module, "manager_whatsapp_link", lambda: "https://wa.me/77000000000"
+    )
+    await _seed_text_message(
+        session_factory,
+        sender=sender,
+        body="1",
+        external_message_id="wamid.MVP6_3b",
+    )
+    extractor = _FakeExtractor()
+    search = _FakeSearch(results=(_result("Кроссовки", 1000),))
+    client = _FakeWhatsAppClient()
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=search,
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert extractor.calls == []
+    assert search.calls == []
+    assert client.calls[0][1] == (
+        "Вы выбрали: Кроссовки — 1000 ₸.\n\n"
+        "Напишите менеджеру:\nhttps://wa.me/77000000000"
+    )
+    async with session_factory() as session:
+        state = (
+            await session.execute(
+                select(WhatsAppRecommendationState).where(
+                    WhatsAppRecommendationState.external_user_id == sender,
+                    WhatsAppRecommendationState.status
+                    == RECOMMENDATION_STATUS_SELECTED,
+                )
+            )
+        ).scalars().one()
+    assert state.selected_index == 1
+
+
+async def test_selection_three_resolves_third_displayed_product(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: object,
+) -> None:
+    sender = "77000000014"
+    await _seed_text_message(
+        session_factory, sender=sender, external_message_id="wamid.MVP6_4a"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(
+            results=(
+                _result("Кроссовки", 1000),
+                _result("Ботинки", 2000),
+                _result("Футболка", 3000),
+            )
+        ),
+        now=_NOW,
+    )
+    monkeypatch.setattr(
+        worker_module, "manager_whatsapp_link", lambda: "https://wa.me/77000000000"
+    )
+    await _seed_text_message(
+        session_factory,
+        sender=sender,
+        body="3",
+        external_message_id="wamid.MVP6_4b",
+    )
+    client = _FakeWhatsAppClient()
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=()),
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert "Вы выбрали: Футболка — 3000 ₸." in client.calls[0][1]
+
+
+async def test_out_of_range_selection_asks_valid_range(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    sender = "77000000015"
+    await _seed_text_message(
+        session_factory, sender=sender, external_message_id="wamid.MVP6_5a"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(
+            results=(_result("Кроссовки", 1000), _result("Ботинки", 2000))
+        ),
+        now=_NOW,
+    )
+    await _seed_text_message(
+        session_factory,
+        sender=sender,
+        body="3",
+        external_message_id="wamid.MVP6_5b",
+    )
+    extractor = _FakeExtractor()
+    client = _FakeWhatsAppClient()
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=_FakeSearch(results=()),
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert client.calls[0][1] == "Выберите, пожалуйста, номер от 1 до 2."
+    assert extractor.calls == []
+    state = await _load_active_state(session_factory, sender)
+    assert state is not None
+    assert state.status == RECOMMENDATION_STATUS_ACTIVE
+
+
+async def test_selection_isolated_between_customers(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    sender_a = "77000000016"
+    sender_b = "77000000017"
+    await _seed_text_message(
+        session_factory, sender=sender_a, external_message_id="wamid.MVP6_6a"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
+        now=_NOW,
+    )
+    await _seed_text_message(
+        session_factory,
+        sender=sender_b,
+        body="1",
+        external_message_id="wamid.MVP6_6b",
+    )
+    extractor = _FakeExtractor()
+    search = _FakeSearch(results=(_result("Кроссовки", 1000),))
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=extractor,
+        search=search,
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert extractor.calls == ["1"]
+    assert search.calls == [(extractor.request, 3)]
+    state = await _load_active_state(session_factory, sender_a)
+    assert state is not None
+    assert state.status == RECOMMENDATION_STATUS_ACTIVE
+
+
+async def test_zero_results_create_unmet_demand_and_send_response(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _seed_text_message(
+        session_factory,
+        sender="77000000018",
+        body="плащ",
+        external_message_id="wamid.MVP6_7",
+    )
+    extractor = _FakeExtractor(
+        request=_product_request(query_text="плащ", category="coat", language="ru")
+    )
+    client = _FakeWhatsAppClient()
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=_FakeSearch(results=()),
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert client.calls[0][1] == unmet_demand_response("ru")
+    async with session_factory() as session:
+        demand = (await session.execute(select(UnmetDemand))).scalars().one()
+    assert demand.query_text == "плащ"
+    assert demand.category == "coat"
+    assert demand.language == "ru"
+    assert demand.external_user_id == "77000000018"
+
+
+async def test_unmet_demand_idempotent_per_source_message(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    message_id, _ = await _seed_text_message(
+        session_factory,
+        sender="77000000019",
+        body="плащ",
+        external_message_id="wamid.MVP6_8",
+    )
+    first = await persist_unmet_demand(
+        session_factory=session_factory,
+        channel="whatsapp",
+        external_user_id="77000000019",
+        source_message_id=message_id,
+        request=_product_request(query_text="плащ"),
+    )
+    second = await persist_unmet_demand(
+        session_factory=session_factory,
+        channel="whatsapp",
+        external_user_id="77000000019",
+        source_message_id=message_id,
+        request=_product_request(query_text="плащ"),
+    )
+    assert first is True
+    assert second is False
+    assert await _count(session_factory, UnmetDemand) == 1
+
+
+async def test_missing_manager_link_confirmation_without_link(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: object,
+) -> None:
+    sender = "77000000020"
+    await _seed_text_message(
+        session_factory, sender=sender, external_message_id="wamid.MVP6_9a"
+    )
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=_FakeWhatsAppClient(),
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
+        now=_NOW,
+    )
+    monkeypatch.setattr(worker_module, "manager_whatsapp_link", lambda: None)
+    await _seed_text_message(
+        session_factory,
+        sender=sender,
+        body="1",
+        external_message_id="wamid.MVP6_9b",
+    )
+    client = _FakeWhatsAppClient()
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=()),
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert "Вы выбрали: Кроссовки — 1000 ₸." in client.calls[0][1]
+    assert "Напишите менеджеру:" not in client.calls[0][1]
 
 
 # ── Extra: non-WhatsApp job is released ─────────────────────────────────
