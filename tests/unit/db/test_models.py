@@ -23,6 +23,11 @@ def test_all_expected_tables_are_registered() -> None:
         "catalog_import_errors",
         "product_indexing_tasks",
         "product_embeddings",
+        "channel_connections",
+        "inbound_events",
+        "inbound_messages",
+        "message_processing_jobs",
+        "whatsapp_delivery_statuses",
     }
     actual = set(Base.metadata.tables)
     assert actual == expected, f"Expected {expected}, got {actual}"
@@ -484,7 +489,7 @@ def test_postgresql_ddl_compiles() -> None:
     for name, table in tables.items():
         ddl[name] = str(CreateTable(table).compile(dialect=postgresql.dialect()))
 
-    assert len(ddl) == 8
+    assert len(ddl) == 13
 
     # PostgreSQL UUID types on every primary key
     for tname in ddl:
@@ -639,6 +644,293 @@ def test_no_duplicate_or_missing_columns() -> None:
         assert len(table.columns) == len(cols), (
             f"{tname} must not declare duplicate column names"
         )
+
+
+# ── Inbound ingestion models (T-021) ──────────────────────────────────
+
+
+def test_inbound_ingestion_unique_constraints_exact() -> None:
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+
+    event_ucs = _collect_unique_constraints(tables["inbound_events"])
+    assert any(
+        uc.name == "uq_inbound_events_connection_channel_payload_sha256"
+        and _columns_match(uc, {"connection_id", "channel", "payload_sha256"})
+        for uc in event_ucs
+    ), "Expected UNIQUE(connection_id, channel, payload_sha256) on inbound_events"
+
+    message_ucs = _collect_unique_constraints(tables["inbound_messages"])
+    assert any(
+        uc.name == "uq_inbound_messages_connection_channel_external_message_id"
+        and _columns_match(
+            uc, {"connection_id", "channel", "external_message_id"}
+        )
+        for uc in message_ucs
+    ), "Expected UNIQUE(connection_id, channel, external_message_id)"
+
+    job_ucs = _collect_unique_constraints(tables["message_processing_jobs"])
+    assert any(
+        uc.name == "uq_message_processing_jobs_message_id"
+        and _columns_match(uc, {"message_id"})
+        for uc in job_ucs
+    ), "Expected UNIQUE(message_id) on message_processing_jobs"
+
+    status_ucs = _collect_unique_constraints(tables["whatsapp_delivery_statuses"])
+    assert any(
+        uc.name == "uq_whatsapp_delivery_statuses_connection_fingerprint_sha256"
+        and _columns_match(uc, {"connection_id", "fingerprint_sha256"})
+        for uc in status_ucs
+    ), "Expected UNIQUE(connection_id, fingerprint_sha256) on statuses"
+
+    conn_ucs = _collect_unique_constraints(tables["channel_connections"])
+    assert any(
+        uc.name == "uq_channel_connections_id_channel"
+        and _columns_match(uc, {"id", "channel"})
+        for uc in conn_ucs
+    ), "Expected UNIQUE(id, channel) on channel_connections"
+
+
+def test_inbound_ingestion_foreign_keys() -> None:
+    from sqlalchemy import ForeignKeyConstraint
+
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+
+    def fk_of(tname: str, name: str) -> ForeignKeyConstraint:
+        for c in tables[tname].constraints:
+            if isinstance(c, ForeignKeyConstraint) and c.name == name:
+                return c
+        raise AssertionError(f"Missing FK {name} on {tname}")
+
+    # Composite connection/channel FKs reuse UNIQUE(channel_connections.id, channel)
+    for tname, fk_name in (
+        ("inbound_events", "fk_inbound_events_connection_channel"),
+        ("inbound_messages", "fk_inbound_messages_connection_channel"),
+    ):
+        fk = fk_of(tname, fk_name)
+        assert len(fk.columns) == 2
+        assert {col.name for col in fk.columns} == {"connection_id", "channel"}
+        assert fk.ondelete == "RESTRICT"
+        remote = [
+            (elem.column.table.name, elem.column.name) for elem in fk.elements
+        ]
+        assert ("channel_connections", "id") in remote
+        assert ("channel_connections", "channel") in remote
+
+    event_fk = fk_of("inbound_messages", "fk_inbound_messages_inbound_event")
+    assert {col.name for col in event_fk.columns} == {"inbound_event_id"}
+    assert event_fk.ondelete == "RESTRICT"
+
+    status_event_fk = fk_of(
+        "whatsapp_delivery_statuses", "fk_whatsapp_delivery_statuses_inbound_event"
+    )
+    assert {col.name for col in status_event_fk.columns} == {"inbound_event_id"}
+    assert status_event_fk.ondelete == "RESTRICT"
+
+    status_conn_fk = fk_of(
+        "whatsapp_delivery_statuses", "fk_whatsapp_delivery_statuses_connection"
+    )
+    assert {col.name for col in status_conn_fk.columns} == {"connection_id"}
+    assert status_conn_fk.ondelete == "RESTRICT"
+
+    job_fk = fk_of("message_processing_jobs", "fk_message_processing_jobs_message")
+    assert {col.name for col in job_fk.columns} == {"message_id"}
+    assert job_fk.ondelete == "CASCADE"
+
+
+def test_inbound_ingestion_check_constraints() -> None:
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+
+    expected_checks = {
+        "inbound_events": {"ck_inbound_events_payload_sha256_length"},
+        "inbound_messages": {
+            "ck_inbound_messages_business_scope",
+            "ck_inbound_messages_channel_valid",
+            "ck_inbound_messages_message_type_valid",
+            "ck_inbound_messages_media_size_non_negative",
+            "ck_inbound_messages_media_duration_non_negative",
+            "ck_inbound_messages_media_checksum_length",
+            "ck_inbound_messages_media_columns_consistent",
+            "ck_inbound_messages_type_invariant",
+        },
+        "message_processing_jobs": {
+            "ck_message_processing_jobs_attempts_non_negative"
+        },
+        "whatsapp_delivery_statuses": {
+            "ck_whatsapp_delivery_statuses_fingerprint_length",
+            "ck_whatsapp_delivery_statuses_status_valid",
+        },
+        "channel_connections": {
+            "ck_channel_connections_channel_valid",
+            "ck_channel_connections_name_not_empty",
+        },
+    }
+    for tname, required in expected_checks.items():
+        existing = {
+            c.name
+            for c in tables[tname].constraints
+            if isinstance(c, CheckConstraint) and c.name is not None
+        }
+        assert required <= existing, (
+            f"Missing check constraints on {tname}: {required - existing}"
+        )
+
+
+def test_message_processing_job_enum_contract() -> None:
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+    status_col = tables["message_processing_jobs"].columns["status"]
+    assert status_col.type.__class__.__name__ == "ENUM"
+    enum_obj = status_col.type
+    assert enum_obj.name == "message_processing_job_status"
+    assert enum_obj.enums == ["pending", "processing", "completed", "failed"]
+    assert enum_obj.values_callable is not None
+    assert enum_obj.create_type is False
+
+    from talap.db.models import MessageProcessingJobStatus
+
+    assert [value.value for value in MessageProcessingJobStatus] == [
+        "pending",
+        "processing",
+        "completed",
+        "failed",
+    ]
+
+
+def test_inbound_jsonb_and_timestamptz_contract() -> None:
+    import talap.db.models  # noqa: F401
+
+    tables = Base.metadata.tables
+
+    assert tables["inbound_events"].columns["payload_json"].type.__class__.__name__ == "JSONB"
+    assert (
+        tables["whatsapp_delivery_statuses"].columns["error_codes"].type.__class__.__name__
+        == "JSONB"
+    )
+
+    for tname, col in (
+        ("inbound_events", "received_at"),
+        ("inbound_messages", "received_at"),
+        ("whatsapp_delivery_statuses", "occurred_at"),
+        ("message_processing_jobs", "available_at"),
+    ):
+        column = tables[tname].columns[col]
+        assert column.type.__class__.__name__ == "DateTime"
+        assert column.type.timezone is True, f"{tname}.{col} must be timestamptz"
+
+    error_codes = tables["whatsapp_delivery_statuses"].columns["error_codes"]
+    assert error_codes.server_default is not None
+    assert "[]" in str(error_codes.server_default.arg)
+
+    job_status = tables["message_processing_jobs"].columns["status"]
+    assert job_status.server_default is not None
+    assert "pending" in str(job_status.server_default.arg)
+
+
+def test_inbound_one_to_one_processing_job_relationship() -> None:
+    import talap.db.models  # noqa: F401
+
+    configure_mappers()
+
+    message_mapper = class_mapper(Base.registry._class_registry["InboundMessage"])
+    job_rel = message_mapper.relationships["processing_job"]
+    assert job_rel.uselist is False, (
+        "InboundMessage.processing_job must be one-to-one (uselist=False)"
+    )
+    assert job_rel.passive_deletes is True
+    assert job_rel.back_populates == "message"
+    assert job_rel.backref is None
+
+    job_mapper = class_mapper(Base.registry._class_registry["MessageProcessingJob"])
+    message_rel = job_mapper.relationships["message"]
+    assert message_rel.passive_deletes is True
+    assert message_rel.back_populates == "processing_job"
+
+
+def test_inbound_relationship_contract() -> None:
+    import talap.db.models  # noqa: F401
+
+    configure_mappers()
+
+    def mapper_of(name: str):
+        return class_mapper(Base.registry._class_registry[name])
+
+    expected_pairs = {
+        ("ChannelConnection", "inbound_events", "InboundEvent", "connection"),
+        ("ChannelConnection", "inbound_messages", "InboundMessage", "connection"),
+        (
+            "ChannelConnection",
+            "whatsapp_delivery_statuses",
+            "WhatsAppDeliveryStatus",
+            "connection",
+        ),
+        ("InboundEvent", "messages", "InboundMessage", "inbound_event"),
+        (
+            "InboundEvent",
+            "whatsapp_delivery_statuses",
+            "WhatsAppDeliveryStatus",
+            "inbound_event",
+        ),
+        ("InboundMessage", "processing_job", "MessageProcessingJob", "message"),
+    }
+    for cls_name, rel_name, other_cls, other_rel in expected_pairs:
+        rel = mapper_of(cls_name).relationships[rel_name]
+        assert rel.back_populates == other_rel, (
+            f"{cls_name}.{rel_name} must back_populates {other_cls}.{other_rel}"
+        )
+        assert rel.backref is None, (
+            f"{cls_name}.{rel_name} must not use legacy backref"
+        )
+
+    for cls_name in (
+        "ChannelConnection",
+        "InboundEvent",
+        "InboundMessage",
+        "WhatsAppDeliveryStatus",
+    ):
+        for rel in mapper_of(cls_name).relationships.values():
+            assert "delete" not in rel.cascade, (
+                f"{cls_name}.{rel.key} must not cascade deletes"
+            )
+
+
+def test_inbound_ddl_compiles() -> None:
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
+
+    import talap.db.models  # noqa: F401
+
+    ddl = {
+        name: str(CreateTable(table).compile(dialect=postgresql.dialect()))
+        for name, table in Base.metadata.tables.items()
+    }
+
+    assert (
+        "UNIQUE (connection_id, channel, payload_sha256)"
+        in ddl["inbound_events"]
+    )
+    assert (
+        "UNIQUE (connection_id, channel, external_message_id)"
+        in ddl["inbound_messages"]
+    )
+    assert "UNIQUE (message_id)" in ddl["message_processing_jobs"]
+    assert (
+        "UNIQUE (connection_id, fingerprint_sha256)"
+        in ddl["whatsapp_delivery_statuses"]
+    )
+    assert "UNIQUE (id, channel)" in ddl["channel_connections"]
+    assert "JSONB" in ddl["inbound_events"]
+    assert "JSONB" in ddl["whatsapp_delivery_statuses"]
+    assert "message_processing_job_status" in ddl["message_processing_jobs"]
+    assert "CREATE TYPE" not in ddl["message_processing_jobs"]
+    assert "CHECK (message_type IN" in ddl["inbound_messages"]
+    assert "CHECK (attempts >= 0)" in ddl["message_processing_jobs"]
 
 
 # ── helpers ─────────────────────────────────────────────────────────────

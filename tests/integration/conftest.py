@@ -27,6 +27,11 @@ TALAP_TEST_ADVISORY_LOCK_ID: int = int.from_bytes(
 )
 
 _APP_TABLES = (
+    "message_processing_jobs",
+    "whatsapp_delivery_statuses",
+    "inbound_messages",
+    "inbound_events",
+    "channel_connections",
     "catalog_import_errors",
     "catalog_imports",
     "inventory",
