@@ -74,6 +74,30 @@ async def test_valid_1024_vector_contract() -> None:
 
 
 @respx.mock
+async def test_embed_query_uses_retrieval_query_task() -> None:
+    client = _client()
+    route = respx.post(_ENDPOINT).mock(
+        return_value=httpx.Response(200, json=_embedding_payload(_vector()))
+    )
+
+    result = await client.embed_query("синие кроссовки")
+
+    assert route.called
+    body = json.loads(route.calls[0].request.content)
+    assert body["input"] == ["синие кроссовки"]
+    assert body["task"] == "retrieval.query"
+    assert body["model"] == "jina-embeddings-v5-text-small"
+    assert body["dimensions"] == 1024
+    assert "test-key" not in json.dumps(body)
+    assert result.provider == "jina"
+    assert result.model == "jina-embeddings-v5-text-small"
+    assert result.dimensions == 1024
+    assert len(result.vector) == 1024
+    assert result.vector == tuple(_vector())
+    await client.aclose()
+
+
+@respx.mock
 async def test_wrong_dimension_rejected_and_not_retried() -> None:
     client = _client(max_retries=2)
     route = respx.post(_ENDPOINT).mock(

@@ -17,6 +17,7 @@ import httpx
 from talap.embeddings.types import (
     PROVIDER_JINA,
     TASK_DOCUMENT,
+    TASK_QUERY,
     EmbeddingResult,
 )
 
@@ -94,12 +95,29 @@ class JinaEmbeddingClient:
         """Embed one canonical product document (task=``retrieval.passage``)."""
         if text.strip() == "":
             raise JinaEmbeddingError("Cannot embed an empty document.")
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "input": [text],
-            "task": TASK_DOCUMENT,
-            "dimensions": self.dimensions,
-        }
+        return await self._embed(
+            {
+                "model": self.model,
+                "input": [text],
+                "task": TASK_DOCUMENT,
+                "dimensions": self.dimensions,
+            }
+        )
+
+    async def embed_query(self, text: str) -> EmbeddingResult:
+        """Embed one search query (task=``retrieval.query``)."""
+        if text.strip() == "":
+            raise JinaEmbeddingError("Cannot embed an empty query.")
+        return await self._embed(
+            {
+                "model": self.model,
+                "input": [text],
+                "task": TASK_QUERY,
+                "dimensions": self.dimensions,
+            }
+        )
+
+    async def _embed(self, payload: dict[str, Any]) -> EmbeddingResult:
         last_error: _RetryableJinaError | None = None
         for attempt in range(self.max_retries + 1):
             try:
