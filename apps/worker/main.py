@@ -1,18 +1,28 @@
-"""Background-worker entrypoint for the product-indexing lifecycle.
+"""Background-worker entrypoints (one-shot, no loop).
 
-T-017B1 exposes a one-shot claim function for diagnostics only; an ARQ loop
-and an embedding processor arrive in later tasks. Nothing in this module runs
-at import time, and it is NOT a complete indexing worker.
+Nothing in this module runs at import time. ARQ/scheduler loops arrive in
+later tasks; MVP workers expose one-shot functions for manual execution and
+integration tests.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
 
+from apps.worker.jobs.whatsapp_echo import (
+    EchoProcessingResult,
+    run_whatsapp_echo_once,
+)
 from talap.db import async_session_factory
 from talap.indexing.worker import claim_indexing_tasks
 
 _DEFAULT_STALE_AFTER = timedelta(minutes=5)
+
+__all__ = [
+    "EchoProcessingResult",
+    "run_indexing_claim_once",
+    "run_whatsapp_echo_once",
+]
 
 
 async def run_indexing_claim_once(limit: int = 10) -> int:

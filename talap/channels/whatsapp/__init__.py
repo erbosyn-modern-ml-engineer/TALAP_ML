@@ -1,3 +1,8 @@
+from talap.channels.whatsapp.client import (
+    SentWhatsAppMessage,
+    WhatsAppClient,
+    WhatsAppClientError,
+)
 from talap.channels.whatsapp.normalizer import (
     WhatsAppDeliveryStatus,
     WhatsAppDeliveryStatusEvent,
@@ -12,6 +17,9 @@ from talap.channels.whatsapp.security import (
 )
 
 __all__ = [
+    "SentWhatsAppMessage",
+    "WhatsAppClient",
+    "WhatsAppClientError",
     "WhatsAppDeliveryStatus",
     "WhatsAppDeliveryStatusEvent",
     "WhatsAppNormalizationError",

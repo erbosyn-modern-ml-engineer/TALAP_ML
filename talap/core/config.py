@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     whatsapp_verify_token: SecretStr | None = None
     whatsapp_app_secret: SecretStr | None = None
 
+    # ── WhatsApp outbound (MVP-2 echo) ──────────────────────────────────
+    whatsapp_access_token: SecretStr | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_graph_api_version: str = "v21.0"
+
     # ── Telegram Bot API ────────────────────────────────────────────────
     telegram_bot_token: SecretStr | None = None
     telegram_webhook_secret: SecretStr | None = None
@@ -94,6 +99,7 @@ class Settings(BaseSettings):
         "jina_api_key",
         "whatsapp_verify_token",
         "whatsapp_app_secret",
+        "whatsapp_access_token",
         mode="before",
     )
     @classmethod
