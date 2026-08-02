@@ -12,6 +12,7 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+coverage/
 
 .idea/
 .vscode/
