@@ -1,24 +1,28 @@
-"""Real-PostgreSQL integration tests for the WhatsApp MVP-2 echo worker."""
+"""Real-PostgreSQL integration tests for the WhatsApp recommendation worker."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from apps.worker.jobs.whatsapp_echo import (
-    ECHO_TEXT,
+    CLARIFICATION_PREFIX,
+    NO_RESULTS_TEXT,
+    RECOMMENDATION_HEADER,
     EchoOutcome,
     process_one_whatsapp_echo_job,
+)
+from talap.ai.customer_request import (
+    CustomerRequest,
+    CustomerRequestExtractionError,
 )
 from talap.channels.telegram import normalize_telegram_update
 from talap.channels.whatsapp import (
     SentWhatsAppMessage,
-    WhatsAppClientError,
     normalize_whatsapp_webhook,
 )
 from talap.db.models import (
@@ -29,6 +33,7 @@ from talap.db.models import (
     MessageProcessingJobStatus,
 )
 from talap.ingestion import ingest_normalized_webhook
+from talap.search.products import ProductSearchResult
 
 _NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
 _RECEIVED = _NOW
@@ -40,25 +45,86 @@ class _FakeWhatsAppClient:
         *,
         error: Exception | None = None,
         sent_id: str = "wamid.SYNTHETIC_SENT_1",
-        on_send: object | None = None,
     ) -> None:
         self.calls: list[tuple[str, str]] = []
         self.error = error
         self.sent_id = sent_id
-        self.on_send = on_send
 
     async def send_text(
         self, *, recipient: str, text: str
     ) -> SentWhatsAppMessage:
         self.calls.append((recipient, text))
-        if self.on_send is not None:
-            await self.on_send()  # type: ignore[misc]
         if self.error is not None:
             raise self.error
         return SentWhatsAppMessage(external_message_id=self.sent_id)
 
     async def aclose(self) -> None:
         pass
+
+
+class _FakeExtractor:
+    def __init__(
+        self,
+        request: CustomerRequest | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.request = request if request is not None else _product_request()
+        self.error = error
+        self.calls: list[str] = []
+
+    async def __call__(self, *, text: str) -> CustomerRequest:
+        self.calls.append(text)
+        if self.error is not None:
+            raise self.error
+        return self.request
+
+
+class _FakeSearch:
+    def __init__(
+        self,
+        results: tuple[ProductSearchResult, ...] = (),
+        error: Exception | None = None,
+    ) -> None:
+        self.results = results
+        self.error = error
+        self.calls: list[tuple[CustomerRequest, int]] = []
+
+    async def __call__(
+        self, *, request: CustomerRequest, limit: int = 3
+    ) -> tuple[ProductSearchResult, ...]:
+        self.calls.append((request, limit))
+        if self.error is not None:
+            raise self.error
+        return self.results
+
+
+def _product_request(**overrides: object) -> CustomerRequest:
+    base: dict[str, object] = {
+        "intent": "product_search",
+        "language": "ru",
+        "query_text": "синие кроссовки",
+        "category": None,
+        "attributes": {},
+        "budget_max_kzt": None,
+        "quantity": None,
+        "missing_field": None,
+    }
+    base.update(overrides)
+    return CustomerRequest(**base)
+
+
+def _result(name: str, price: int) -> ProductSearchResult:
+    return ProductSearchResult(
+        product_id=uuid4(),
+        name=name,
+        category="school",
+        description=None,
+        price_kzt=price,
+        available_quantity=5,
+        merchant_sku="SKU-1",
+        material=None,
+        similarity=0.9,
+    )
 
 
 async def _create_connection(
@@ -204,35 +270,6 @@ async def _seed_text_message(
         return message.id, job.id
 
 
-async def _seed_unsupported_message(
-    session_factory: async_sessionmaker[AsyncSession],
-    *,
-    sender: str = "77000000002",
-    external_message_id: str = "wamid.SYNTHETIC_ECHO_STICKER_1",
-) -> tuple[UUID, UUID]:
-    raw = _whatsapp_unsupported_raw(
-        message_id=external_message_id, sender=sender
-    )
-    await _ingest_raw(session_factory, raw=raw, channel="whatsapp")
-    async with session_factory() as session:
-        message = (
-            await session.execute(
-                select(InboundMessage).where(
-                    InboundMessage.external_message_id == external_message_id
-                )
-            )
-        ).scalar_one()
-        job = (
-            await session.execute(
-                select(MessageProcessingJob).where(
-                    MessageProcessingJob.message_id == message.id
-                )
-            )
-        ).scalar_one()
-        await _make_job_due(session_factory, job.id)
-        return message.id, job.id
-
-
 async def _make_job_due(
     session_factory: async_sessionmaker[AsyncSession],
     job_id: UUID,
@@ -263,26 +300,34 @@ async def _count(
         ).scalar_one()
 
 
-# ── 1–4. Happy path ─────────────────────────────────────────────────────
+# ── 1–7. Recommendation flow ───────────────────────────────────────────
 
 
-async def test_pending_job_claimed_once_and_completed(
+async def test_pending_text_job_produces_recommendation_response(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     _, job_id = await _seed_text_message(session_factory)
     client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor()
+    search = _FakeSearch(
+        results=(_result("Кроссовки", 1000), _result("Ботинки", 2000))
+    )
     result = await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=search,
+        now=_NOW,
     )
     assert result.outcome == EchoOutcome.SENT
     assert result.job_id == job_id
-    job = await _load_job(session_factory, job_id)
-    assert job.status == MessageProcessingJobStatus.COMPLETED
-    assert job.attempts == 1
-    assert job.started_at == _NOW
+    text = client.calls[0][1]
+    assert RECOMMENDATION_HEADER in text
+    assert "1. Кроссовки — 1000 ₸" in text
+    assert "2. Ботинки — 2000 ₸" in text
 
 
-async def test_inbound_external_user_id_passed_as_recipient(
+async def test_inbound_user_id_used_as_recipient(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     await _seed_text_message(
@@ -290,99 +335,150 @@ async def test_inbound_external_user_id_passed_as_recipient(
     )
     client = _FakeWhatsAppClient()
     result = await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
+        session_factory=session_factory,
+        client=client,
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
+        now=_NOW,
     )
     assert result.outcome == EchoOutcome.SENT
     assert client.calls[0][0] == "77000000007"
 
 
-async def test_exact_fixed_text_passed_to_client(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    await _seed_text_message(session_factory)
-    client = _FakeWhatsAppClient()
-    result = await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
-    )
-    assert result.outcome == EchoOutcome.SENT
-    assert client.calls[0][1] == ECHO_TEXT
-    assert ECHO_TEXT == "Сообщение получено"
-    assert result.sent_external_message_id == "wamid.SYNTHETIC_SENT_1"
-
-
-async def test_successful_send_marks_job_completed(
+async def test_successful_recommendation_marks_job_completed(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     _, job_id = await _seed_text_message(session_factory)
     client = _FakeWhatsAppClient()
     await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
+        session_factory=session_factory,
+        client=client,
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
+        now=_NOW,
     )
     job = await _load_job(session_factory, job_id)
     assert job.status == MessageProcessingJobStatus.COMPLETED
+    assert job.attempts == 1
     assert job.completed_at == _NOW
     assert job.last_error is None
 
 
-# ── 5. Concurrent claimers ──────────────────────────────────────────────
-
-
-async def test_two_workers_do_not_claim_same_job(
+async def test_extractor_receives_exact_stored_text(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    _, job_id = await _seed_text_message(session_factory)
-    client_a = _FakeWhatsAppClient()
-    client_b = _FakeWhatsAppClient()
-    result_a, result_b = await asyncio.gather(
-        process_one_whatsapp_echo_job(
-            session_factory=session_factory, client=client_a, now=_NOW
-        ),
-        process_one_whatsapp_echo_job(
-            session_factory=session_factory, client=client_b, now=_NOW
-        ),
+    await _seed_text_message(
+        session_factory, body="купите мне синие кроссовки"
     )
-    assert {result_a.outcome, result_b.outcome} == {
-        EchoOutcome.SENT,
-        EchoOutcome.NO_JOB,
-    }
-    assert (len(client_a.calls) + len(client_b.calls)) == 1
-    job = await _load_job(session_factory, job_id)
-    assert job.status == MessageProcessingJobStatus.COMPLETED
-    assert job.attempts == 1
+    client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor()
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
+        now=_NOW,
+    )
+    assert extractor.calls == ["купите мне синие кроссовки"]
 
 
-# ── 6–7. Failure paths ──────────────────────────────────────────────────
+async def test_search_receives_validated_request_with_limit_three(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _seed_text_message(session_factory)
+    client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor()
+    search = _FakeSearch(results=(_result("Кроссовки", 1000),))
+    await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=search,
+        now=_NOW,
+    )
+    assert len(search.calls) == 1
+    assert search.calls[0][0] is extractor.request
+    assert search.calls[0][1] == 3
 
 
-async def test_temporary_failure_schedules_retry(
+async def test_no_result_response_completes_job(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     _, job_id = await _seed_text_message(session_factory)
-    client = _FakeWhatsAppClient(error=WhatsAppClientError("transient"))
+    client = _FakeWhatsAppClient()
     result = await process_one_whatsapp_echo_job(
         session_factory=session_factory,
         client=client,
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=()),
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert client.calls[0][1] == NO_RESULTS_TEXT
+    job = await _load_job(session_factory, job_id)
+    assert job.status == MessageProcessingJobStatus.COMPLETED
+
+
+async def test_clarification_branch_completes_without_search(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _, job_id = await _seed_text_message(session_factory)
+    client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor(request=_product_request(missing_field="цвет"))
+    search = _FakeSearch(results=(_result("Кроссовки", 1000),))
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=search,
+        now=_NOW,
+    )
+    assert result.outcome == EchoOutcome.SENT
+    assert search.calls == []
+    assert client.calls[0][1] == CLARIFICATION_PREFIX + "цвет"
+    job = await _load_job(session_factory, job_id)
+    assert job.status == MessageProcessingJobStatus.COMPLETED
+
+
+# ── 8–10. Failure paths and side-effect freedom ────────────────────────
+
+
+async def test_external_failure_schedules_retry(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _, job_id = await _seed_text_message(session_factory)
+    client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor(error=CustomerRequestExtractionError("boom"))
+    result = await process_one_whatsapp_echo_job(
+        session_factory=session_factory,
+        client=client,
+        extractor=extractor,
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
         max_attempts=3,
         retry_delay=timedelta(minutes=5),
         now=_NOW,
     )
     assert result.outcome == EchoOutcome.RETRY_SCHEDULED
+    assert client.calls == []
     job = await _load_job(session_factory, job_id)
     assert job.status == MessageProcessingJobStatus.PENDING
     assert job.attempts == 1
     assert job.available_at == _NOW + timedelta(minutes=5)
-    assert job.last_error == "WhatsApp echo send failed."
+    assert job.last_error == "Customer request extraction failed."
     assert job.started_at is None
 
 
-async def test_max_attempt_failure_marks_failed(
+async def test_max_attempt_external_failure_marks_failed(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     _, job_id = await _seed_text_message(session_factory)
-    client = _FakeWhatsAppClient(error=WhatsAppClientError("transient"))
+    client = _FakeWhatsAppClient()
+    extractor = _FakeExtractor(error=CustomerRequestExtractionError("boom"))
     result = await process_one_whatsapp_echo_job(
         session_factory=session_factory,
         client=client,
+        extractor=extractor,
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
         max_attempts=1,
         retry_delay=timedelta(minutes=5),
         now=_NOW,
@@ -392,54 +488,10 @@ async def test_max_attempt_failure_marks_failed(
     assert job.status == MessageProcessingJobStatus.FAILED
     assert job.attempts == 1
     assert job.completed_at == _NOW
-    assert job.last_error == "WhatsApp echo send failed."
+    assert job.last_error == "Customer request extraction failed."
 
 
-# ── 8. Unsupported message ──────────────────────────────────────────────
-
-
-async def test_unsupported_message_completes_without_send(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    _, job_id = await _seed_unsupported_message(session_factory)
-    client = _FakeWhatsAppClient()
-    result = await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
-    )
-    assert result.outcome == EchoOutcome.NO_RESPONSE
-    assert client.calls == []
-    job = await _load_job(session_factory, job_id)
-    assert job.status == MessageProcessingJobStatus.COMPLETED
-
-
-# ── 9. No open DB transaction during HTTP wait ──────────────────────────
-
-
-async def test_no_db_transaction_open_during_fake_http(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    _, job_id = await _seed_text_message(session_factory)
-
-    async def _probe() -> None:
-        # Runs inside send_text; a committed claim must be visible from a
-        # separate session (PROCESSING, attempts=1).
-        async with session_factory() as session:
-            job = await session.get(MessageProcessingJob, job_id)
-            assert job is not None
-            assert job.status == MessageProcessingJobStatus.PROCESSING
-            assert job.attempts == 1
-
-    client = _FakeWhatsAppClient(on_send=_probe)
-    result = await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
-    )
-    assert result.outcome == EchoOutcome.SENT
-
-
-# ── 10. No new rows created ─────────────────────────────────────────────
-
-
-async def test_echo_processor_creates_no_new_rows(
+async def test_no_new_inbound_event_message_or_job_created(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     before = (
@@ -450,17 +502,19 @@ async def test_echo_processor_creates_no_new_rows(
     await _seed_text_message(session_factory)
     client = _FakeWhatsAppClient()
     await process_one_whatsapp_echo_job(
-        session_factory=session_factory, client=client, now=_NOW
+        session_factory=session_factory,
+        client=client,
+        extractor=_FakeExtractor(),
+        search=_FakeSearch(results=(_result("Кроссовки", 1000),)),
+        now=_NOW,
     )
     after = (
         await _count(session_factory, InboundEvent),
         await _count(session_factory, InboundMessage),
         await _count(session_factory, MessageProcessingJob),
     )
-    # The echo processor adds one row of each during seeding (test setup),
-    # but processing itself must not create any additional rows.
+    # Seeding adds one row of each; processing itself must not create any.
     assert after == (before[0] + 1, before[1] + 1, before[2] + 1)
-    # Exactly one message and one job exist for the seeded message.
     assert after[1] == 1
     assert after[2] == 1
 
