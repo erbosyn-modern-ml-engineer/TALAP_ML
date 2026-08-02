@@ -1,5 +1,10 @@
 from talap.indexing.decisions import SEMANTIC_PRODUCT_FIELDS, semantic_changed_fields
 from talap.indexing.documents import build_product_index_text
+from talap.indexing.processor import (
+    IndexingProcessResult,
+    IndexingProcessStatus,
+    process_claimed_indexing_task,
+)
 from talap.indexing.scheduler import schedule_product_indexing
 from talap.indexing.worker import (
     ClaimedIndexingTask,
@@ -18,6 +23,8 @@ from talap.indexing.worker import (
 
 __all__ = [
     "ClaimedIndexingTask",
+    "IndexingProcessResult",
+    "IndexingProcessStatus",
     "IndexingTaskNotFoundError",
     "InvalidIndexingTaskTransitionError",
     "SEMANTIC_PRODUCT_FIELDS",
@@ -27,6 +34,7 @@ __all__ = [
     "decide_failure_outcome",
     "mark_indexing_task_completed",
     "mark_indexing_task_failed",
+    "process_claimed_indexing_task",
     "sanitize_error_message",
     "schedule_product_indexing",
     "semantic_changed_fields",

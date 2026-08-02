@@ -12,6 +12,7 @@ from talap.db.base import Base
 from talap.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from talap.db.models.embeddings import ProductEmbedding
     from talap.db.models.indexing import ProductIndexingTask
     from talap.db.models.merchant import Merchant
 
@@ -67,6 +68,15 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="product",
         # The composite FK is non-null and uses ON DELETE CASCADE; SQLAlchemy
         # must not load the task collection or null out child FKs on delete.
+        passive_deletes=True,
+    )
+
+    embedding: Mapped[ProductEmbedding | None] = relationship(
+        "ProductEmbedding",
+        back_populates="product",
+        uselist=False,
+        # The composite FK is non-null and uses ON DELETE CASCADE; SQLAlchemy
+        # must never load or null out the embedding row on Product delete.
         passive_deletes=True,
     )
 

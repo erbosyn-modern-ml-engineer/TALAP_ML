@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     deepseek_timeout_seconds: int = Field(default=30, gt=0)
     deepseek_max_retries: int = Field(default=1, ge=0, le=5)
 
+    # ── Jina embeddings ─────────────────────────────────────────────────
+    # Fixed MVP decision from the TALAP benchmark: Jina v5-text-small, 1024d.
+    jina_api_key: SecretStr | None = None
+    jina_base_url: str = "https://api.jina.ai/v1"
+    jina_embedding_model: str = "jina-embeddings-v5-text-small"
+    jina_embedding_dimensions: int = Field(default=1024, gt=0)
+    jina_timeout_seconds: int = Field(default=30, gt=0)
+    jina_max_retries: int = Field(default=2, ge=0, le=5)
+
     # ── Meta WhatsApp Cloud API ─────────────────────────────────────────
     meta_app_secret: SecretStr | None = None
     meta_verify_token: SecretStr | None = None
@@ -76,6 +85,7 @@ class Settings(BaseSettings):
         "telegram_bot_token",
         "telegram_webhook_secret",
         "internal_service_token",
+        "jina_api_key",
         mode="before",
     )
     @classmethod

@@ -22,6 +22,7 @@ def test_all_expected_tables_are_registered() -> None:
         "catalog_imports",
         "catalog_import_errors",
         "product_indexing_tasks",
+        "product_embeddings",
     }
     actual = set(Base.metadata.tables)
     assert actual == expected, f"Expected {expected}, got {actual}"
@@ -483,7 +484,7 @@ def test_postgresql_ddl_compiles() -> None:
     for name, table in tables.items():
         ddl[name] = str(CreateTable(table).compile(dialect=postgresql.dialect()))
 
-    assert len(ddl) == 7
+    assert len(ddl) == 8
 
     # PostgreSQL UUID types on every primary key
     for tname in ddl:

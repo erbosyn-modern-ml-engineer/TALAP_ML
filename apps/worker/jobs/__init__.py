@@ -3,6 +3,7 @@ from apps.worker.jobs.indexing import (
     claim_indexing_batch,
     complete_indexing_task,
     fail_indexing_task,
+    process_one_indexing_task,
 )
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "claim_indexing_batch",
     "complete_indexing_task",
     "fail_indexing_task",
+    "process_one_indexing_task",
 ]
